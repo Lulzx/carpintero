@@ -138,15 +138,34 @@ which is a change to Arturo and therefore upstream's call to make.
 
 ## What does not
 
-`defer` blocks reach the capture log and come back in the result as host
-block ids in match order, but nothing runs them, since running one means
-calling back into Arturo. Memoization is not wired up. Neither is the
-`opSpan` charset-run optimisation, which is emitted nowhere yet.
+Two separate lists, because they are different kinds of work. The first
+decides whether this can be a builtin at all. The second only decides how
+fast it is once it is one.
 
-Nothing is wired into Arturo as a builtin, and nothing here changes Arturo.
-The `Item` type stands in for `Value`, and everything crossing between them
-goes through JSON, which the measurement above shows is the whole cost of
-the current bridge.
+**Required before it could be integrated:**
+
+- A `Value` adapter. `Item` stands in for Arturo's `Value` today, and
+  everything crossing between them goes through JSON, which the measurement
+  above shows is the entire cost of the current bridge. A builtin would
+  match the block it was handed in place.
+- Host escapes calling back into the interpreter. `do` compiles to nothing
+  and `defer` blocks reach the capture log and come back as ids in match
+  order, but neither runs, since running one means evaluating Arturo from
+  inside the matcher.
+- Registration: a `src/library/Parse.nim` and a line in `src/vm/vm.nim`.
+  That is a change to Arturo, so it is upstream's to make, and this package
+  does not make it.
+
+**Optional, and only about speed:**
+
+- Memoization. The interpreted matcher has `scan.memo`; the compiled core
+  does not.
+- `opSpan`, a greedy charset run. The opcode exists and the compiler emits
+  it nowhere. It is the obvious win for character-level grammars like
+  `stripComments`.
+
+Neither of the optional two is worth doing before the required three, since
+both would have to be re-tested against a different value model afterwards.
 
 The corpus run compares matching, not diagnostics: the exported answer
 carries success, captures and collections, but not the farthest-failure path

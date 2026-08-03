@@ -402,6 +402,25 @@ There is even a formal criterion for the compiler's best optimization: the
 grammars a compiler can lower to DFA-like code with no backtracking at all,
 which generalizes the charset-run and head-fail tricks LPeg applies ad hoc.
 
+That core now exists, in `nim/`: about 1,800 lines, no dependencies,
+matching text and blocks, and held to the interpreted semantics by running
+the same grammar over the same input in both engines rather than by sharing
+code. Over Arturo's own source the two agree on every one of 168 files and
+find the same 287 definitions, the interpreted matcher taking 16.6 seconds
+of scanning and the compiled core 28 milliseconds.
+
+**It has to be a builtin, and that is a measured claim rather than a
+preference.** The package changes nothing in Arturo, so the only way to
+reach the compiled core from Arturo today is `call.external`, which carries
+scalars. Sending a lexed file across that boundary as JSON costs 13.8
+seconds of the interpreter's time to serialise, against 0.13 seconds to
+cross and match. The engine is not the bottleneck and no work on the engine
+would make it one: an extension API that serialises cannot expose this, and
+a builtin holding the `Value` block it was handed does not have to. What
+that asks for upstream is a `src/library/Parse.nim` and a line in
+`src/vm/vm.nim`, plus a way for `do` and `defer` to evaluate back into the
+interpreter. Everything else in `nim/` is already written and tested.
+
 **Error reporting is where this can beat Rebol.** Classic PARSE returns true
 or false and nothing else, and Red and Ren-C both had to retrofit tracing hooks
 to find out where a grammar died. The standard fix, from Ford's thesis
@@ -526,9 +545,12 @@ dialect must agree with the language about what position N means.
   the interpreted semantics by a differential harness rather than by shared
   code. Over Arturo's own source both engines find the same 287 definitions
   in the same 168 files with no disagreement, the interpreted matcher taking
-  16.6 seconds of scanning and the compiled core 28 milliseconds. What
-  remains is the integration: `Value` in place of the JSON adapter, escapes
-  calling back into the interpreter, and memoization.
+  16.6 seconds of scanning and the compiled core 28 milliseconds.
+  What remains splits in two. Integration is required and is upstream's:
+  `Value` in place of the JSON adapter, escapes calling back into the
+  interpreter, and registering the module. Memoization and the charset-run
+  opcode are optional and only about speed, and are worth leaving until
+  after the value model settles.
 
 ## Demos, in order of how convincing they are
 
