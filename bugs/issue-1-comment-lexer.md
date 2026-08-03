@@ -40,3 +40,10 @@ and exit.
 Found while developing a pure-Arturo parsing package. Practical workaround:
 restrict comments to plain words, commas, periods, colons, and single
 dashes.
+
+A general in-language workaround also exists, since `read` returns raw
+source without lexing: strip comments at the string level (respecting
+string and char literals), then lex with `to :block` and evaluate with
+`do` — the lexer never sees a comment byte. The package now ships this
+as `loadSafe`; the repro file above, which hangs `arturo` directly, runs
+correctly through it.

@@ -24,7 +24,11 @@
 ;; writing this file, each expressed with a feature of the language:
 ;;   1. comments avoid quote marks, brackets and backslashes, since the
 ;;      lexer does not fully ignore comment contents — a backslash-dash
-;;      in a comment hangs it. This one has no in-language fix.
+;;      in a comment hangs it. This file keeps its comments plain, and
+;;      exports the general fix: loadSafe strips comments from source
+;;      at the string level, before the lexer sees a byte of them,
+;;      using a Carpintero grammar — see comment-safe source loading
+;;      at the end of this file.
 ;;   2. every call whose result is unused goes through discard: a
 ;;      dropped call result can otherwise leak into the argument
 ;;      stream of an enclosing call
@@ -902,4 +906,44 @@ scanError: function [][
 
 scan?: function [input rule][
     not? null? scan input rule
+]
+
+;; ── comment-safe source loading ──────────────────────────────────────
+;; The 0.10.0 lexer does not fully ignore comment contents: a
+;; backslash-dash in a comment hangs the file loader, and quotes or
+;; brackets in comments corrupt the token stream — see bugs. The way
+;; around it, from first principles: read gives us the raw source as a
+;; string without lexing anything, so strip comments at the string
+;; level and only then hand the result to the lexer, which never sees
+;; a comment byte. The stripper is a Carpintero grammar — this package
+;; fixing the language lexer with its own dialect. Newlines are kept,
+;; so line numbers survive stripping.
+
+SRCNL: to :char 10
+SRCBS: to :char 92
+
+srcEsc:     [SRCBS skip]
+srcStr:     [{"} any [srcEsc | not {"} skip] {"}]
+srcCurly:   ["{" any [srcCurly | not "}" skip] "}"]
+srcChar:    ["'" not "'" skip "'"]
+srcComment: [";" any [not SRCNL skip]]
+srcPlain:   [some [not {"} not "{" not "'" not ";" skip]]
+srcClean:   [collect 'parts [
+    any [keep srcStr | keep srcCurly | keep srcChar | srcComment
+        | keep srcPlain | keep skip]
+]]
+
+;; source string in, source string without comments out
+stripComments: function [src][
+    r: scan src srcClean
+    join r\parts
+]
+
+;; path in, lexed block out; evaluate it with do at top level, where
+;; definitions bind globally. Files whose comments would hang or
+;; confuse the interpreter load correctly through here. The block is
+;; padded with a trailing true so do never sees a value-less tail —
+;; the do result is the padding, not the file's last value.
+loadSafe: function [path][
+    to :block (stripComments read path) ++ " true"
 ]

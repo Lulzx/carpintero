@@ -65,6 +65,12 @@ scan code [any [funcdef | skip]]
 Charsets are values and compose: `csUnion`, `csIntersect`,
 `csComplement` (the unprefixed words belong to core, for blocks).
 
+Two utilities ride along: `stripComments` removes comments from a
+source string with a Carpintero grammar, and `loadSafe` reads a file,
+strips it, and returns the lexed block — which sidesteps the 0.10.0
+lexer bug where comment contents can hang or corrupt the interpreter
+(`examples/safeload.art` runs a file that hangs `arturo` directly).
+
 Semantics worth knowing, all deliberate (the design rationale lives in
 [proposal.md](proposal.md)):
 
@@ -95,7 +101,7 @@ Draft implementation of the proposal's Phase 0–2 scope, pure Arturo,
 verified against Arturo 0.10.0. This includes the interpreted half of
 Phase 3 — `cut`, `defer`, opt-in memoization, benchmarks — with only
 the compiled Nim core left to propose upstream. `demo.art` is the test
-suite (68 checks):
+suite (71 checks):
 
 ```
 arturo demo.art

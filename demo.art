@@ -217,6 +217,20 @@ print "the report itself:"
 print msg
 print ""
 
+;; comment-safe loading: the stripper keeps the lexer from ever seeing
+;; a comment byte. The hostile comment is built programmatically so
+;; this file itself stays safe to lex.
+nlc: to :string to :char 10
+bsc: to :string to :char 92
+hostile: join @[";" " bad " bsc "- comment" nlc "hx: 42" nlc "hx"]
+cleaned: stripComments hostile
+check "stripComments removes the bomb" in? bsc cleaned false
+r15: do to :block cleaned
+check "stripped source runs" r15 42
+guarded: join @["hy: " {"} "semi ; inside" {"} nlc "hy"]
+r16: do to :block stripComments guarded
+check "semicolon in string survives" r16 "semi ; inside"
+
 print ""
 print "-- error demos (each panics; run separately) -----------------"
 print {   scan "x" [nosuchrule]}

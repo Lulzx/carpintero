@@ -343,7 +343,7 @@ rather than a subsystem.
 This is no longer hypothetical: a draft ships alongside this proposal.
 `carpintero.art` (about 800 lines) implements the Phase 0 through Phase 2
 scope against Arturo 0.10.0, plus the interpreted half of Phase 3 —
-`cut`, `defer`, opt-in memoization — and `demo.art` passes sixty-eight checks
+`cut`, `defer`, opt-in memoization — and `demo.art` passes seventy-one checks
 covering the date example above, capture rollback across failed
 alternatives, the progress guard on nullable loop bodies, prefix mode,
 `to`/`thru`, charset ranges, a mutually recursive JSON validator in nine
@@ -376,7 +376,15 @@ blocks cannot assign," which accidentally enforced this proposal's own
 value-less tail, and the draft now sidesteps it by evaluating every
 escape block padded with a trailing value (`op ++ [true]`), so escapes
 may in fact assign freely. The unused-result leak is likewise avoided
-with the language's own `discard` rather than dummy assignments.
+with the language's own `discard` rather than dummy assignments. Even
+the lexer bug has an in-language mitigation, and it is the most
+Carpintero-shaped fix imaginable: `read` returns raw source without
+lexing anything, so `loadSafe` strips comments at the string level
+with a nine-rule Carpintero grammar and only then hands the source to
+the lexer, which never sees a comment byte. The file in `bugs/` that
+hangs the interpreter runs correctly through it
+(`examples/safeload.art`) — the dialect fixing the language's own
+front end, which is demo 3's thesis stated as a working program.
 
 **Then propose the matcher core in Nim,** once the vocabulary and the
 backtracking semantics have stopped moving. The target is an LPeg-style
