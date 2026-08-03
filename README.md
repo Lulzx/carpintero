@@ -49,6 +49,7 @@ scan code [any [funcdef | skip]]
 | Advance | `to` (exclusive), `thru` (inclusive), `skip`, `end` |
 | Look | `ahead`, `not` |
 | Capture | `capture 'name rule`, `collect 'name rule` + `keep rule` |
+| Descend | `into rule` (match a nested block in full with its own rules) |
 | Escape | `do [...]` host code, `quote value` literal match, `fail "msg"` |
 | Match | strings, chars, charsets, `:type` values, `'word` literals, named rules |
 
@@ -69,7 +70,7 @@ Semantics worth knowing, all deliberate (the design rationale lives in
 ## Status
 
 Draft implementation of the proposal's Phase 0–2 scope, pure Arturo,
-verified against Arturo 0.10.0. `demo.art` is the test suite (47 checks):
+verified against Arturo 0.10.0. `demo.art` is the test suite (51 checks):
 
 ```
 arturo demo.art

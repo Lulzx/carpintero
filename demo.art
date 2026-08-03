@@ -119,6 +119,14 @@ check "block: funcdef found (last wins)" to :string first r5\name "add"
 check "block: funcdef params" first r5\params [a b]
 check "block: non-code rejects" scan? [1 2 3] funcdef false
 
+;; into: descend into a nested block with its own rules
+pair: [:integer :string]
+check "into descends" scan? [[1 "a"] [2 "b"]] [some [into pair]] true
+check "into needs whole nested match" scan? [[1 "a" "x"]] [into pair] false
+check "into rejects non-block element" scan? [42] [into pair] false
+r5b: scan [[1 "one"] [2 "two"]] [some [into [:integer capture 'w :string]]]
+check "into: nested capture (last wins)" first r5b\w "two"
+
 ;; Phase 2, lookahead, collect and keep, host escape, error reporting.
 
 check "ahead looks without consuming" scan? "ab" [ahead "ab" "ab"] true

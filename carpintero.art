@@ -15,6 +15,7 @@
 ;;   some R, any R, opt R, N R, between N M R
 ;;   to R, thru R, skip, end
 ;;   capture with a literal name and a rule
+;;   into R, matching a nested block in its entirety with rule R
 ;;   any other word: a named rule, resolved when scan runs
 ;;
 ;; Two workarounds for Arturo 0.10.0 interpreter quirks, found while
@@ -106,7 +107,7 @@ failAt: function [pos what][
 
 ;; ── rule structure ───────────────────────────────────────────────────
 
-KEYWORDS: ["some" "any" "opt" "between" "capture" "to" "thru" "skip" "end" "quote" "ahead" "not" "collect" "keep" "do" "fail"]
+KEYWORDS: ["some" "any" "opt" "between" "capture" "to" "thru" "skip" "end" "quote" "ahead" "not" "collect" "keep" "do" "fail" "into"]
 
 ;; number of items the element starting at idx occupies
 elemSpan: function [items idx][
@@ -114,7 +115,7 @@ elemSpan: function [items idx][
     if integer? it -> return 1 + elemSpan items idx + 1
     unless word? it -> return 1
     w: to :string it
-    if in? w ["some" "any" "opt" "to" "thru" "ahead" "not" "keep"] -> return 1 + elemSpan items idx + 1
+    if in? w ["some" "any" "opt" "to" "thru" "ahead" "not" "keep" "into"] -> return 1 + elemSpan items idx + 1
     if w = "between" -> return 3 + elemSpan items idx + 3
     if in? w ["capture" "collect"] -> return 2 + elemSpan items idx + 2
     if in? w ["quote" "do" "fail"] -> return 2
@@ -226,7 +227,7 @@ matchElemRaw: function [items idx pos][
             ]
             p: matchElem items idx + 2 pos
             if null? p -> return null
-            CS\log: append CS\log @[@["cap" to :string nm  pos  p]]
+            CS\log: append CS\log @[@["cap" to :string nm  pos  p  CS\inp]]
             return p
         ]
         if w = "ahead" [
@@ -254,7 +255,7 @@ matchElemRaw: function [items idx pos][
             if CS\coldepth = 0 -> panic "carpintero: keep outside collect"
             p: matchElem items idx + 1 pos
             if null? p -> return null
-            CS\log: append CS\log @[@["keep" "" pos p]]
+            CS\log: append CS\log @[@["keep" "" pos p CS\inp]]
             return p
         ]
         if w = "do" [
@@ -266,6 +267,33 @@ matchElemRaw: function [items idx pos][
         if w = "fail" [
             msg: items\[idx + 1]
             panic ~"carpintero: |msg| at position |pos|"
+        ]
+        if w = "into" [
+            unless CS\isblk -> panic "carpintero: into needs block input"
+            desc: "a nested block"
+            if pos >= CS\len -> return failAt pos desc
+            el: CS\inp\[pos]
+            unless block? el -> return failAt pos desc
+            ; descend: swap the input for the nested block, match the
+            ; operand against all of it, then restore. The farthest
+            ; failure mark uses outer coordinates only, so nested
+            ; detail is summarized as the outer element that failed.
+            oInp: CS\inp
+            oLen: CS\len
+            oFar: CS\far
+            oExp: CS\exp
+            CS\inp: el
+            CS\len: size el
+            CS\far: 0
+            CS\exp: []
+            inner: matchElem items idx + 1 0
+            CS\inp: oInp
+            CS\len: oLen
+            CS\far: oFar
+            CS\exp: oExp
+            if null? inner -> return failAt pos desc
+            unless inner = size el -> return failAt pos desc
+            return pos + 1
         ]
         if w = "quote" [
             unless CS\isblk -> panic "carpintero: quote needs block input"
@@ -407,6 +435,7 @@ elemNullable?: function [items idx nmap][
         w: to :string it
         if in? w ["any" "opt" "to" "end" "ahead" "not" "do"] -> return true
         if in? w ["some" "thru" "keep"] -> return elemNullable? items idx + 1 nmap
+        if w = "into" -> return false
         if w = "between" -> return or? ((items\[idx + 1]) = 0) (elemNullable? items idx + 3 nmap)
         if in? w ["capture" "collect"] -> return elemNullable? items idx + 2 nmap
         if in? w ["quote" "fail" "skip"] -> return false
@@ -478,7 +507,9 @@ elemHeads: function [items idx nmap][
         if in? w ["some" "any" "opt" "to" "thru" "ahead" "not" "keep"] -> return elemHeads items idx + 1 nmap
         if w = "between" -> return elemHeads items idx + 3 nmap
         if in? w ["capture" "collect"] -> return elemHeads items idx + 2 nmap
-        if in? w ["quote" "do" "fail" "skip" "end"] -> return []
+        ; into starts its operand at position 0 of a strictly smaller
+        ; input, so descent is progress and cannot left-recurse
+        if in? w ["quote" "do" "fail" "skip" "end" "into"] -> return []
         return @[w]
     ]
     []
@@ -571,21 +602,27 @@ scan: function [input rule][
     if null? p -> return null
     if and? (null? pfx) (p <> CS\len) -> return null
     caps: #[]
-    emptyCap: (CS\isblk)? -> [] -> ""
     cnames: []
     citems: []
     unless empty? CS\log [
         loop CS\log 'e [
             kind: e\0
+            ; cap and keep entries carry the input they refer to, since
+            ; a capture inside into spans the nested block, not the top
             if kind = "cap" [
-                caps\[e\1]: (e\2 = e\3)? -> emptyCap -> slice CS\inp e\2 e\3 - 1
+                src: e\4
+                v: (block? src)? -> [] -> ""
+                unless e\2 = e\3 -> v: slice src e\2 e\3 - 1
+                caps\[e\1]: v
             ]
             if kind = "copen" [
                 cnames: append cnames e\1
                 citems: append citems @[[]]
             ]
             if kind = "keep" [
-                v: (e\2 = e\3)? -> emptyCap -> slice CS\inp e\2 e\3 - 1
+                src: e\4
+                v: (block? src)? -> [] -> ""
+                unless e\2 = e\3 -> v: slice src e\2 e\3 - 1
                 top: (size citems) - 1
                 citems\[top]: append citems\[top] @[v]
             ]

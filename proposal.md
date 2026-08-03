@@ -338,14 +338,16 @@ dependencies. If the semantics turn out wrong, throwing it away costs a week
 rather than a subsystem.
 
 This is no longer hypothetical: a draft ships alongside this proposal.
-`carpintero.art` (about 650 lines) implements the Phase 0 through Phase 2
-scope against Arturo 0.10.0, and `demo.art` passes forty-seven checks
+`carpintero.art` (about 680 lines) implements the Phase 0 through Phase 2
+scope against Arturo 0.10.0, and `demo.art` passes fifty-one checks
 covering the date example above, capture rollback across failed
 alternatives, the progress guard on nullable loop bodies, prefix mode,
 `to`/`thru`, charset ranges, a mutually recursive JSON validator in nine
 rules, block matching (the funcdef example above runs as written against a
 block of Arturo code, with `:type` terminals, literal-word matching, and
-`quote`), lookahead, `collect`/`keep` with rollback, the `do` escape (the
+`quote`), `into` descent into nested blocks (with captures inside the
+nested block landing correctly, and rolling back with the path that made
+them), lookahead, `collect`/`keep` with rollback, the `do` escape (the
 demo *demonstrates* the re-run contract: an escape inside `some` runs once
 per attempt, including the failed one), and the farthest-failure error
 report: the `date` grammar failing on `"2026-08-0x"` yields "scan failed at
