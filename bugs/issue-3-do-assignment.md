@@ -1,19 +1,23 @@
 # [Draft issue for arturo-lang/arturo]
 
-**Title:** `do` of a block containing an assignment crashes silently when the executing function is nested
+**Title:** `do` of a block whose last expression produces no value corrupts the enclosing frame
 
 **Body:**
 
 ## Describe the bug
 
-`do someBlock` works inside a function called from top level, but when the
-`do`-executing function is itself called from another function, a block
-containing an assignment, plain (`x: 3`) or path (`G\n: 3`), makes the
-interpreter exit 1 silently: no output, no error message.
+`do` of a block whose **last expression produces no value** leaves the
+enclosing frame expecting one, and the interpreter exits 1 silently: no
+output, no error message. A plain assignment (`x: 3`), a path assignment
+(`G\n: 3`), a `set` call, and a call to a function whose own body ends
+value-less all leave a block value-less.
 
-Blocks containing only expressions or calls to functions of arity ≥ 1 work
-at any nesting depth. Calls to zero-arity functions in the same
-configuration also crash.
+Whether it crashes is contextual, which is why one shape can look like
+several bugs: the first repro below needs the `do`-executing function to
+be called from another function, and the second crashes at top level.
+Blocks ending in an ordinary expression work at any depth. Arity is not
+the discriminator either, since the arity-1 `bad` in the second repro
+fails while the arity-1 `good` beside it does not.
 
 ## To reproduce
 
@@ -42,23 +46,6 @@ same `do` succeed.
 
 Prints `2`, then `3`, then `never reached`.
 
-## Root cause hypothesis, and a reliable workaround
-
-The common factor across every crashing shape is that the block's **last
-expression produces no value** (an assignment, a `set` call, a call to a
-function whose own body ends value-less), rather than the assignment
-itself. `do` of such a block appears to leave the enclosing frame
-expecting a value that never arrives. Whether that corrupts anything is
-contextual, which is why the same shape sometimes works at one nesting
-depth and dies at another.
-
-Padding the block with a trailing value before evaluation makes every
-shape below work, at any depth tested:
-
-```arturo
-discard do blk ++ [true]
-```
-
 ## A second shape of the same crash
 
 The nesting is not required if the assignment hides inside a called
@@ -79,6 +66,19 @@ print "never reached"
 
 Actual output: `good survives`, then silent exit 1.
 
+## A reliable workaround
+
+Padding the block with a trailing value before evaluation makes both
+shapes above work, at any depth tested:
+
+```arturo
+discard do blk ++ [true]
+```
+
+Discard that result rather than binding it. `res: discard do blk ++
+[true]` reintroduces the bug, since `discard` produces no value of its
+own and so leaves the assignment with the same value-less tail.
+
 ## Environment
 
 - Arturo 0.10.0 "Arizona Bark" (arm64/macos, Homebrew)
@@ -86,5 +86,5 @@ Actual output: `good survives`, then silent exit 1.
 ## Context
 
 Found while implementing a host-code escape in a pure-Arturo parsing
-package. Workaround: escape blocks call arity-1+ helper functions instead
-of assigning directly.
+package, which now pads every escape block this way (`discard do op ++
+[true]`), so escapes may assign freely.
