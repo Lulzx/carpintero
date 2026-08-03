@@ -520,10 +520,15 @@ dialect must agree with the language about what position N means.
   descriptions, `fail "message"`, `collect`/`keep`, lookahead, host escape.
 - **Phase 3**: the Nim rule compiler, `cut`, opt-in per-rule memoization,
   deferred (commit-time) escapes if demand exists, benchmarks against `match`
-  and against hand-written parsers. Everything but the compiler now exists
-  in the interpreted draft (`cut`, `defer`, `scan.memo`, and
-  `examples/bench.art`), so what remains of Phase 3 is exactly the upstream
-  conversation: an engine swap under settled semantics.
+  and against hand-written parsers. The interpreted draft carries `cut`,
+  `defer`, `scan.memo` and `examples/bench.art`, and `nim/` now carries the
+  compiler: an LPeg-style instruction set matching text and blocks, held to
+  the interpreted semantics by a differential harness rather than by shared
+  code. Over Arturo's own source both engines find the same 287 definitions
+  in the same 168 files with no disagreement, the interpreted matcher taking
+  16.6 seconds of scanning and the compiled core 28 milliseconds. What
+  remains is the integration: `Value` in place of the JSON adapter, escapes
+  calling back into the interpreter, and memoization.
 
 ## Demos, in order of how convincing they are
 

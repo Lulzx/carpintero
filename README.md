@@ -103,9 +103,18 @@ lives in [proposal.md](proposal.md)):
 ## Status
 
 Draft implementation of the proposal's Phase 0–2 scope, pure Arturo,
-verified against Arturo 0.10.0. This includes the interpreted half of
-Phase 3 (`cut`, `defer`, opt-in memoization, benchmarks), with only
-the compiled Nim core left to propose upstream.
+verified against Arturo 0.10.0, including the interpreted half of Phase 3
+(`cut`, `defer`, opt-in memoization, benchmarks).
+
+[`nim/`](nim/README.md) is the compiled core: an LPeg-style instruction set
+matching text and blocks, built standalone so it can be developed without
+an Arturo build. It is held to the interpreted semantics by a differential
+harness rather than by shared code, and over Arturo's own source the two
+engines find the same 287 definitions in the same 168 files with no
+disagreement, the interpreted matcher taking 16.6 seconds of scanning and
+the compiled core 28 milliseconds. What remains is integration: Arturo's
+own `Value` in place of the JSON adapter, host escapes calling back into
+the interpreter, and memoization.
 
 `demo.art` is the readable tour (71 checks). `tests.art` is the
 regression suite (354 checks, nonzero exit on failure). Grammar errors

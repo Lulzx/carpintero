@@ -28,6 +28,7 @@ type
         itType
         itBlock
         itDictionary
+        itOpaque
 
     Item* = object
         case kind*: ItemKind
@@ -41,14 +42,27 @@ type
             s*: string
         of itBlock: items*: seq[Item]
         of itDictionary: pairs*: seq[(string, Item)]
+        of itOpaque:
+            ## Every other Arturo type: :inline, :path, :attribute, :color,
+            ## :quantity, :regex, :version and the rest. The matcher asks
+            ## three questions of a value, and an opaque one answers all
+            ## three: what type is it (`tag`), is it a block to descend into
+            ## (no), and is it equal to that other value (`tag` and `repr`).
+            ## `repr` is empty for the types Arturo cannot render to a
+            ## string, which makes two of those compare equal on tag alone.
+            ## `quote` is the only word that would notice, and the exporter
+            ## refuses to serialise a `quote` of one.
+            tag*: string
+            repr*: string
 
 const typeNames*: array[ItemKind, string] = [
     ":null", ":logical", ":integer", ":floating", ":string", ":char",
     ":word", ":label", ":literal", ":symbol", ":symbolliteral", ":type",
-    ":block", ":dictionary"]
+    ":block", ":dictionary", ""]
 
 proc typeName*(it: Item): string {.inline.} =
-    typeNames[it.kind]
+    if it.kind == itOpaque: ":" & it.tag
+    else: typeNames[it.kind]
 
 proc `==`*(a, b: Item): bool =
     ## Structural equality.
@@ -79,6 +93,7 @@ proc `==`*(a, b: Item): bool =
             if a.pairs[k][0] != b.pairs[k][0]: return false
             if a.pairs[k][1] != b.pairs[k][1]: return false
         true
+    of itOpaque: a.tag == b.tag and a.repr == b.repr
 
 proc `$`*(it: Item): string =
     case it.kind
@@ -102,6 +117,8 @@ proc `$`*(it: Item): string =
         var parts: seq[string] = @[]
         for (k, v) in it.pairs: parts.add(k & ":" & $v)
         "[" & parts.join(" ") & "]"
+    of itOpaque:
+        if it.repr.len > 0: it.repr else: "<" & it.tag & ">"
 
 # constructors, for tests and for the adapter
 proc iNull*(): Item = Item(kind: itNull)
@@ -117,3 +134,5 @@ proc iSym*(s: string): Item = Item(kind: itSymbol, s: s)
 proc iSymLit*(s: string): Item = Item(kind: itSymbolLiteral, s: s)
 proc iType*(s: string): Item = Item(kind: itType, s: s)
 proc iBlock*(items: varargs[Item]): Item = Item(kind: itBlock, items: @items)
+
+proc iOpaque*(tag, repr: string): Item = Item(kind: itOpaque, tag: tag, repr: repr)

@@ -8,7 +8,7 @@
 ## engines rather than comparing one engine against a hand-written
 ## expectation. A disagreement is a real disagreement about the language.
 
-import std/[os, strutils, tables, strformat]
+import std/[os, strutils, tables, strformat, monotimes, times]
 import ../src/carpintero
 import ../src/carpintero/load
 
@@ -35,18 +35,32 @@ proc main() =
     var fails: seq[Failure] = @[]
     var compared = 0
     var skipped: seq[string] = @[]
+    # totals on both sides, so a run that compares nothing cannot look like a
+    # run that agrees about everything
+    var wantedCaps, gotCaps, wantedColl, gotColl, inputItems = 0
 
+    var compileNs, scanNs: int64 = 0
     for c in cases:
         var r: ScanResult
         try:
+            let t0 = getMonoTime()
             let prog = compile(c.grammar)
+            let t1 = getMonoTime()
             r = if c.isBlock: scan(prog, c.items) else: scan(prog, c.text)
+            let t2 = getMonoTime()
+            compileNs += (t1 - t0).inNanoseconds
+            scanNs += (t2 - t1).inNanoseconds
         except CompileError as e:
             # the interpreted side panics on a bad grammar, and those cases
             # are covered by tests-panics.art rather than here
             skipped.add(c.name & " (" & e.msg & ")")
             continue
         inc compared
+        inputItems += (if c.isBlock: c.items.len else: c.text.len)
+        for _, v in c.captures: inc wantedCaps
+        for _, v in c.collected: wantedColl += v.len
+        for _, v in r.captures: inc gotCaps
+        for _, v in r.collected: gotColl += v.len
 
         if r.ok != c.ok:
             fails.add(Failure(name: c.name, what: "match",
@@ -90,6 +104,11 @@ proc main() =
                                               wanted: $wanted[i], got: $got))
 
     echo &"differential: {compared} cases compared, {fails.len} disagreements"
+    echo &"  input: {inputItems} elements"
+    echo &"  captures: {wantedCaps} interpreted, {gotCaps} compiled"
+    echo &"  collected: {wantedColl} interpreted, {gotColl} compiled"
+    echo &"  compiled engine: {compileNs div 1_000_000} ms compiling, " &
+         &"{scanNs div 1_000_000} ms scanning"
     if skipped.len > 0:
         echo &"  skipped {skipped.len}:"
         for s in skipped: echo "    ", s

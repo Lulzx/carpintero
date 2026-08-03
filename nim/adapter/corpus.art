@@ -1,0 +1,69 @@
+;; corpus.art — export the corpus run as differential cases.
+;;
+;;     arturo nim/adapter/corpus.art ../arturo nim/adapter/corpus.json
+;;
+;; The same grammar `examples/arturo-corpus.art` runs over Arturo's own
+;; source, exported one case per file, with whatever the interpreted matcher
+;; found. The Nim runner then reruns each one and checks it agrees. This is
+;; the corpus run done twice, by two engines that share no code.
+;;
+;; Files are loaded through loadSafe, which strips comments with a
+;; Carpintero grammar before the lexer sees them, so the 0.10.0 comment
+;; bugs do not stop the run.
+
+import ./"export.art"!
+
+;; The grammar, unchanged from examples/arturo-corpus.art except that the
+;; defer arms are dropped: they classify block-bodied against arrow-bodied
+;; definitions by running host code, which the compiled core cannot do, and
+;; the classification is not what is being compared here.
+defn: [
+    capture 'name :label
+    ['function | 'method | quote $]
+    opt :attribute
+    capture 'params :block
+]
+
+walk: [any [ keep defn | into walk | skip ]]
+
+allDefns: [collect 'found walk]
+
+root: first arg
+out:  (2 > size arg)? -> "nim/adapter/corpus.json" -> arg\1
+
+files: select list.recursive.relative root 'f -> "art" = last split.by:"." f
+if empty? files [
+    print ~"no .art files under |root|"
+    exit
+]
+
+cases:   []
+nLoaded: 0
+nFailed: 0
+nDefns:  0
+
+i: 0
+n: size files
+while [i < n][
+    f: files\[i]
+    path: root ++ "/" ++ f
+    blk: []
+    ok: false
+    ; a file that does not lex on its own is not a failure of the grammar:
+    ; Arturo's tree carries fixtures that are deliberately invalid
+    e: try [ blk: loadSafe path  ok: true ]
+    if ok [
+        nLoaded: nLoaded + 1
+        c: caseTree f allDefns blk
+        cases: append cases @[c]
+        found: c\collected
+        if key? found "found" [ nDefns: nDefns + (size found\found) ]
+    ]
+    unless ok [ nFailed: nFailed + 1 ]
+    i: i + 1
+]
+
+discard writeCases out cases
+print ~"exported |size cases| cases from |nLoaded| files (|nFailed| would not lex)"
+print ~"the interpreted matcher found |nDefns| definitions"
+print ~"wrote |out|"

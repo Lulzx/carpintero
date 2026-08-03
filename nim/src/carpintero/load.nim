@@ -40,6 +40,7 @@ proc loadItem*(n: JsonNode): Item =
     of "literal": iLit(want(n, "v").getStr)
     of "symbol": iSym(want(n, "v").getStr)
     of "symbolliteral": iSymLit(want(n, "v").getStr)
+    of "opaque": iOpaque(want(n, "t").getStr, want(n, "v").getStr)
     else:
         raise newException(LoadError, "unknown value kind '" & k & "'")
 

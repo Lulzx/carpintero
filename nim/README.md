@@ -33,6 +33,33 @@ identically and match differently: `'+` prints as `+` and so does the symbol
 `+`, and `quote` has to tell them apart, so every value carries its kind and
 nothing is reconstructed from a rendering.
 
+## Both engines over Arturo's own source
+
+```
+scripts/differential-corpus.sh ../arturo
+```
+
+The corpus grammar from `examples/arturo-corpus.art` runs over every `.art`
+file in an Arturo checkout, once in each engine:
+
+```
+exported 168 cases from 168 files (5 would not lex)
+differential: 168 cases compared, 0 disagreements
+  collected: 287 interpreted, 287 compiled
+  interpreted matcher:  16593 ms scanning
+  compiled engine:         28 ms scanning
+```
+
+The same five-line block grammar finds the same 287 definitions at every
+nesting depth in both, with the same 114 captures, and no case disagrees.
+That is the claim the package was built to make, now made twice by
+implementations that share no matching code.
+
+Both timings are scanning alone. The exporter loads and lexes the corpus
+before the interpreted clock starts, and the compiled clock covers compiling
+each grammar and matching, not reading the case file. The five files that
+will not lex are fixtures in Arturo's test suite that are invalid on purpose.
+
 ## What runs
 
 Both input kinds, through the whole of the control flow: literals,
@@ -72,10 +99,18 @@ Nothing is wired into Arturo as a builtin. The `Item` type stands in for
 `Value`, and the adapter between them goes through JSON rather than through
 memory, which is right for testing and wrong for shipping.
 
-The differential corpus is 51 hand-written cases, not Arturo's source tree.
-Running both engines over the 173-file corpus needs the adapter pointed at
-lexed files rather than at cases, which is the next step and is now
-mechanical.
+The corpus run compares matching, not diagnostics: the exported answer
+carries success, captures and collections, but not the farthest-failure path
+or the expected set, so the two engines are only known to agree about what
+matched.
+
+Values Arturo has and `Item` does not (`:inline`, `:path`, `:attribute`,
+`:color`, `:quantity`, `:regex`, `:version` and the rest, 23 kinds in the
+corpus against 14 modelled) cross as opaque leaves carrying a type tag and a
+rendering. That is enough for the three questions the matcher asks of a
+value, and it holds parity because only `:block` is a block to descend into,
+so a leaf here is a leaf there. It would not hold for a grammar that
+`quote`d one, and the exporter has no way to warn about that yet.
 
 ## Deliberate divergences
 

@@ -48,7 +48,16 @@ itemTree: function [v][
     if in? t ["word" "label" "literal" "symbol" "symbolliteral"] [
         return #[k: t v: to :string v]
     ]
-    panic ~"export: cannot serialize a |t|"
+    ; Everything else: :inline, :path, :attribute, :color, :quantity,
+    ; :regex, :version and the rest. The matcher asks three things of a
+    ; value, and a tag plus a rendering answers all three: what type it is,
+    ; whether it is a block to descend into, and whether it equals another.
+    ; Only :block answers yes to the second, so a leaf here is a leaf there.
+    ; Some of these types have no :string conversion at all, so the
+    ; rendering is attempted and left empty when it fails.
+    r: ""
+    e: try [ r: to :string v ]
+    #[k: "opaque" t: t v: r]
 ]
 
 ;; ── grammars ─────────────────────────────────────────────────────────

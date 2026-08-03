@@ -1,0 +1,50 @@
+;; time-corpus.art — how long the interpreted matcher takes on the corpus,
+;; measuring the same thing the compiled runner measures.
+;;
+;;     arturo nim/adapter/time-corpus.art ../arturo
+;;
+;; Files are loaded and lexed first, untimed, because that work is the
+;; interpreter's own lexer and stripComments rather than the matcher. What
+;; is timed is scanning alone, which is the part the compiled core replaces.
+
+import ./"export.art"!
+
+defn: [
+    capture 'name :label
+    ['function | 'method | quote $]
+    opt :attribute
+    capture 'params :block
+]
+walk: [any [ keep defn | into walk | skip ]]
+allDefns: [collect 'found walk]
+
+root: first arg
+files: select list.recursive.relative root 'f -> "art" = last split.by:"." f
+
+;; load everything first, so the timing covers matching alone
+blocks: []
+i: 0
+n: size files
+while [i < n][
+    path: root ++ "/" ++ files\[i]
+    blk: []
+    ok: false
+    e: try [ blk: loadSafe path  ok: true ]
+    if ok [ blocks: append blocks @[blk] ]
+    i: i + 1
+]
+
+print ~"|size blocks| files lexed, timing the scans"
+
+TAL: #[found: 0]
+secs: benchmark.get [
+    j: 0
+    m: size blocks
+    while [j < m][
+        r: scan blocks\[j] allDefns
+        unless null? r [ TAL\found: TAL\found + size r\found ]
+        j: j + 1
+    ]
+]
+
+print ["interpreted matcher:" secs "scanning," TAL\found "definitions"]
