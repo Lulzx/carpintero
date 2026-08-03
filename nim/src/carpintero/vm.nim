@@ -3,20 +3,34 @@
 ## One loop over a program, one stack. Backtrack entries and call frames share
 ## that stack, as they do in LPeg: an entry with `pc == RetFrame` is a return
 ## address, anything else is a choice point. Failure pops until it finds a
-## choice point, which makes `fail` a single loop rather than an unwind.
+## choice point, which makes failing a loop rather than an unwind.
 ##
 ## The capture log is a flat sequence of open and close markers, and rolling
-## back is `setLen` to a saved height. That is the whole of the rollback
-## semantics the proposal argues for, and it is why a dead parse path costs
-## one integer store rather than a copied dictionary.
+## back is `setLen` to a saved height. A dead parse path costs one integer
+## store rather than a copied dictionary.
+##
+## Two input kinds share the loop. The control flow is identical for both, so
+## only the terminals branch: against text a position indexes runes, against a
+## block it indexes values. `into` is what makes the block side more than a
+## relabelling, since it swaps the sequence being matched partway through and
+## has to put it back on every path out, backtracking included.
 
-import std/[unicode, tables]
-import charset, instructions
+import std/unicode
+import charset, instructions, items
 
 const
     RetFrame = int32(-1)
 
 type
+    SourceKind* = enum
+        skText
+        skBlock
+
+    Source* = object
+        case kind*: SourceKind
+        of skText: text*: seq[Rune]
+        of skBlock: root*: seq[Item]
+
     LogKind* = enum
         lgOpen, lgClose, lgDefer
 
@@ -25,70 +39,136 @@ type
         cap*: CapKind
         name*: int32
         pos*: int32
-        inputId*: int32
+        view*: int32          ## which sequence `pos` indexes
+
+    View = object
+        items: ptr seq[Item]  ## borrowed from the root, which outlives the run
+        outerPos: int32       ## where this block sat in its parent
+        prevView: int32       ## registry index to return to
 
     Frame = object
-        pc: int32            ## resume address, or RetFrame for a call frame
-        pos: int32           ## saved position; the return address on a call frame
+        pc: int32             ## resume address, or RetFrame for a call frame
+        pos: int32            ## saved position; the return address on a call frame
         logTop: int32
-        cutLen: int32        ## cut-frame stack height, restored on resume
-        guard: int32         ## index+1 of the cut frame this arm belongs to,
-                             ## or 0 when this choice is not inside one
+        cutLen: int32
+        guard: int32          ## index+1 of the cut frame this arm belongs to
+        viewTop: int32        ## descent depth, restored on resume
+        curView: int32
+
+    CapValue* = object
+        text*: string         ## text input
+        items*: seq[Item]     ## block input
+
+    Capture* = object
+        name*: string
+        value*: CapValue
+        collected*: seq[CapValue]
 
     MatchResult* = object
         ok*: bool
-        pos*: int32          ## how far the match reached
-        log*: seq[LogEntry]
-        failPos*: int32      ## farthest position any terminal reached
+        pos*: int32
+        caps*: seq[Capture]
+        defers*: seq[int32]   ## host block ids, in match order, success only
+        failPath*: seq[int32] ## descent indices, innermost last
         expected*: seq[string]
-        failMsg*: string     ## set when a `fail` rule fired
+        failMsg*: string
 
-    Matcher* = object
+# ── failure paths ────────────────────────────────────────────────────────
+# For text input the farthest failure is one offset. Under `into` it is a
+# path of indices into the nested structure, compared lexicographically with
+# the deeper of two equal prefixes winning, which degenerates to the plain
+# high-water mark on flat input.
+
+proc farther(a, b: seq[int32]): bool =
+    ## Is `a` strictly farther along than `b`?
+    var i = 0
+    while i < a.len and i < b.len:
+        if a[i] > b[i]: return true
+        if a[i] < b[i]: return false
+        inc i
+    a.len > b.len
+
+type
+    Matcher = object
         prog: Program
-        input: seq[Rune]
+        src: Source
+        views: seq[View]      ## active descents; empty at the top level
+        viewReg: seq[ptr seq[Item]]
+        curView: int32
         stack: seq[Frame]
         log: seq[LogEntry]
         cuts: seq[bool]
-        quiet: int           ## >0 inside `not`, where failures are not reported
-        failPos: int32
+        quiet: int            ## >0 inside `not`, where failures are not reported
+        failPath: seq[int32]
         expected: seq[string]
         failMsg: string
+        haveFail: bool
 
-proc note(m: var Matcher, pos: int32, what: string) {.inline.} =
-    ## Farthest-failure bookkeeping: the high-water mark across all
+proc curItems(m: Matcher): ptr seq[Item] {.inline.} =
+    m.viewReg[m.curView]
+
+proc inputLen(m: Matcher): int32 {.inline.} =
+    case m.src.kind
+    of skText: int32(m.src.text.len)
+    of skBlock: int32(m.curItems[].len)
+
+proc pathAt(m: Matcher, pos: int32): seq[int32] =
+    ## The descent indices plus the position, which is what a failure is
+    ## located by once `into` is in play.
+    for v in m.views:
+        result.add(v.outerPos)
+    result.add(pos)
+
+proc note(m: var Matcher, pos: int32, what: string) =
+    ## Farthest-failure bookkeeping. The high-water mark across all
     ## backtracking is almost always where the real failure is, even though
     ## the matcher has since backtracked far away from it.
     if m.quiet > 0: return
-    if pos > m.failPos:
-        m.failPos = pos
+    let p = m.pathAt(pos)
+    if not m.haveFail or farther(p, m.failPath):
+        m.failPath = p
         m.expected = @[what]
-    elif pos == m.failPos:
+        m.haveFail = true
+    elif p == m.failPath:
         if what notin m.expected:
             m.expected.add(what)
 
 proc describe(p: Program, ins: Instr): string =
     case ins.op
-    of opChar: "'" & $Rune(ins.arg) & "'"
-    of opStr: "\"" & $p.strs[ins.arg] & "\""
+    of opChar: "char " & $Rune(ins.arg)
+    of opStr: "literal " & $p.strs[ins.arg]
     of opSet, opSpan: "a character in a set"
     of opAny: "any value"
     of opEndInput: "end of input"
-    of opTypeTerm, opWordTerm: p.names[ins.arg]
+    of opTypeTerm: p.names[ins.arg]
+    of opWordTerm: "word " & p.names[ins.arg]
+    of opQuote: "quoted " & p.names[ins.arg]
+    of opInto: "a nested block"
+    of opIntoEnd: "end of nested block"
     else: "input"
 
-proc run*(prog: Program, input: seq[Rune]): MatchResult =
-    var m = Matcher(prog: prog, input: input, failPos: -1)
-    let n = int32(input.len)
+proc run*(prog: Program, src: Source): MatchResult =
+    var m = Matcher(prog: prog, src: src)
+    case src.kind
+    of skText:
+        m.viewReg.add(nil)
+    of skBlock:
+        m.viewReg.add(addr m.src.root)
+    m.curView = 0
+
     var pc = prog.entry
     var pos = int32(0)
     var failing = false
+    let isBlock = src.kind == skBlock
 
     template fail() =
         failing = true
 
+    template elem(): Item =
+        m.curItems[][pos]
+
     while true:
         if failing:
-            # unwind to the nearest choice point, dropping call frames
             failing = false
             var resumed = false
             while m.stack.len > 0:
@@ -104,49 +184,80 @@ proc run*(prog: Program, input: seq[Rune]): MatchResult =
                 pos = f.pos
                 m.log.setLen(f.logTop)
                 m.cuts.setLen(f.cutLen)
+                m.views.setLen(f.viewTop)
+                m.curView = f.curView
                 pc = f.pc
                 resumed = true
                 break
             if not resumed:
-                return MatchResult(ok: false, pos: pos, log: @[],
-                                   failPos: m.failPos, expected: m.expected,
+                return MatchResult(ok: false, pos: pos,
+                                   failPath: m.failPath, expected: m.expected,
                                    failMsg: m.failMsg)
             continue
 
         let ins = prog.code[pc]
+        let n = m.inputLen
+
         case ins.op
 
         of opChar:
-            if pos < n and int32(input[pos]) == ins.arg:
+            var hit = false
+            if pos < n:
+                if isBlock:
+                    let e = elem()
+                    hit = e.kind == itChar and e.c == ins.arg
+                else:
+                    hit = int32(m.src.text[pos]) == ins.arg
+            if hit:
                 inc pos
                 inc pc
             else:
                 m.note(pos, describe(prog, ins)); fail()
 
         of opSet:
-            if pos < n and prog.sets[ins.arg].contains(int32(input[pos])):
+            var hit = false
+            if pos < n:
+                if isBlock:
+                    # a charset against block input only matches a char
+                    let e = elem()
+                    hit = e.kind == itChar and prog.sets[ins.arg].contains(e.c)
+                else:
+                    hit = prog.sets[ins.arg].contains(int32(m.src.text[pos]))
+            if hit:
                 inc pos
                 inc pc
             else:
                 m.note(pos, describe(prog, ins)); fail()
 
         of opSpan:
-            while pos < n and prog.sets[ins.arg].contains(int32(input[pos])):
-                inc pos
+            if isBlock:
+                while pos < n and elem().kind == itChar and
+                      prog.sets[ins.arg].contains(elem().c):
+                    inc pos
+            else:
+                while pos < n and prog.sets[ins.arg].contains(int32(m.src.text[pos])):
+                    inc pos
             inc pc
 
         of opStr:
             let lit = prog.strs[ins.arg]
-            let ln = int32(lit.len)
-            if pos + ln <= n:
-                var k = 0
-                while k < lit.len and input[pos + int32(k)] == lit[k]:
-                    inc k
-                if k == lit.len:
-                    pos += ln
-                    inc pc
-                else:
-                    m.note(pos, describe(prog, ins)); fail()
+            var hit = false
+            var width = int32(1)
+            if isBlock:
+                # one string *element*, compared whole
+                if pos < n:
+                    let e = elem()
+                    hit = e.kind == itString and e.s == $lit
+            else:
+                width = int32(lit.len)
+                if pos + width <= n:
+                    var k = 0
+                    while k < lit.len and m.src.text[pos + int32(k)] == lit[k]:
+                        inc k
+                    hit = k == lit.len
+            if hit:
+                pos += width
+                inc pc
             else:
                 m.note(pos, describe(prog, ins)); fail()
 
@@ -162,13 +273,86 @@ proc run*(prog: Program, input: seq[Rune]): MatchResult =
             else:
                 m.note(pos, "end of input"); fail()
 
+        of opTypeTerm:
+            if not isBlock:
+                raise newException(ValueError,
+                    "carpintero: type terminals need block input")
+            if pos < n and elem().typeName == prog.names[ins.arg]:
+                inc pos
+                inc pc
+            else:
+                m.note(pos, describe(prog, ins)); fail()
+
+        of opWordTerm:
+            if not isBlock:
+                raise newException(ValueError,
+                    "carpintero: literal word terminals need block input")
+            var hit = false
+            if pos < n:
+                let e = elem()
+                # a `'word` terminal matches the word by name, whichever of
+                # the word-ish kinds the lexer produced
+                hit = e.kind in {itWord, itLabel, itLiteral} and
+                      e.s == prog.names[ins.arg]
+            if hit:
+                inc pos
+                inc pc
+            else:
+                m.note(pos, describe(prog, ins)); fail()
+
+        of opQuote:
+            if not isBlock:
+                raise newException(ValueError, "carpintero: quote needs block input")
+            # Structural equality, which is a deliberate divergence: the
+            # interpreted matcher compares with Arturo's `=`, and on 0.10.0 a
+            # :symbolliteral is not equal to itself, so `quote '+` cannot
+            # match there and can here. See items.nim.
+            var hit = false
+            if pos < n:
+                hit = $elem() == prog.names[ins.arg]
+            if hit:
+                inc pos
+                inc pc
+            else:
+                m.note(pos, describe(prog, ins)); fail()
+
+        of opInto:
+            if not isBlock:
+                raise newException(ValueError, "carpintero: into needs block input")
+            var ok = false
+            if pos < n and elem().kind == itBlock:
+                ok = true
+            if not ok:
+                m.note(pos, describe(prog, ins)); fail()
+            else:
+                let nested = addr m.curItems[][pos].items
+                m.viewReg.add(nested)
+                m.views.add(View(items: nested, outerPos: pos,
+                                 prevView: m.curView))
+                m.curView = int32(m.viewReg.len - 1)
+                pos = 0
+                inc pc
+
+        of opIntoEnd:
+            # the operand has to have matched the whole nested block
+            if pos != m.inputLen:
+                m.note(pos, describe(prog, ins)); fail()
+            else:
+                let v = m.views[^1]
+                m.views.setLen(m.views.len - 1)
+                m.curView = v.prevView
+                pos = v.outerPos + 1
+                inc pc
+
         of opChoice:
             # aux is 1 when this arm sits directly inside a cut frame, which
             # is the only case where a later `cut` may kill it
             m.stack.add(Frame(pc: pc + ins.arg, pos: pos,
                               logTop: int32(m.log.len),
                               cutLen: int32(m.cuts.len),
-                              guard: if ins.aux == 1: int32(m.cuts.len) else: 0))
+                              guard: if ins.aux == 1: int32(m.cuts.len) else: 0,
+                              viewTop: int32(m.views.len),
+                              curView: m.curView))
             inc pc
 
         of opCommit:
@@ -180,27 +364,34 @@ proc run*(prog: Program, input: seq[Rune]): MatchResult =
             # one stack slot instead of one per iteration
             m.stack[^1].pos = pos
             m.stack[^1].logTop = int32(m.log.len)
+            m.stack[^1].viewTop = int32(m.views.len)
+            m.stack[^1].curView = m.curView
             pc += ins.arg
 
         of opPartialCommitG:
-            # the same, with the progress guard: an iteration that matched
-            # without consuming ends the loop instead of spinning
+            # the progress guard, on the iteration that stalls rather than
+            # one iteration later: what the stalled pass logged goes with it
             if m.stack[^1].pos == pos:
+                m.log.setLen(m.stack[^1].logTop)
                 m.stack.setLen(m.stack.len - 1)
                 pc += ins.aux
             else:
                 m.stack[^1].pos = pos
                 m.stack[^1].logTop = int32(m.log.len)
+                m.stack[^1].viewTop = int32(m.views.len)
+                m.stack[^1].curView = m.curView
                 pc += ins.arg
 
         of opBackCommit:
-            # succeed, but at the saved position: `ahead` and the probe inside
-            # `to`. The capture log is deliberately *not* restored, matching
-            # the interpreted matcher, where a successful lookahead keeps what
-            # it captured.
+            # succeed at the saved position: `ahead`, and the probe inside
+            # `to`. The capture log is deliberately not restored, matching the
+            # interpreted matcher, where a successful lookahead keeps what it
+            # captured. See the README on whether that should be the contract.
             let f = m.stack[^1]
             m.stack.setLen(m.stack.len - 1)
             pos = f.pos
+            m.views.setLen(f.viewTop)
+            m.curView = f.curView
             pc += ins.arg
 
         of opFailTwice:
@@ -219,15 +410,14 @@ proc run*(prog: Program, input: seq[Rune]): MatchResult =
             pc += ins.arg
 
         of opCall:
-            m.stack.add(Frame(pc: RetFrame, pos: pc + 1, logTop: 0,
-                              cutLen: 0, guard: 0))
+            m.stack.add(Frame(pc: RetFrame, pos: pc + 1))
             pc = ins.arg
 
         of opRet:
             # every choice point a rule body opens is committed or unwound
             # before the body ends, so the call frame is on top. If it is not,
-            # the compiler emitted something unbalanced and the assertion is
-            # the cheapest place to find out.
+            # the compiler emitted something unbalanced, and this is the
+            # cheapest place to find out.
             if m.stack.len == 0 or m.stack[^1].pc != RetFrame:
                 raise newException(ValueError,
                     "carpintero vm: unbalanced stack at return")
@@ -236,15 +426,17 @@ proc run*(prog: Program, input: seq[Rune]): MatchResult =
 
         of opCapOpen:
             m.log.add(LogEntry(kind: lgOpen, cap: CapKind(ins.aux),
-                               name: ins.arg, pos: pos))
+                               name: ins.arg, pos: pos, view: m.curView))
             inc pc
 
         of opCapClose:
-            m.log.add(LogEntry(kind: lgClose, cap: CapKind(ins.aux), pos: pos))
+            m.log.add(LogEntry(kind: lgClose, cap: CapKind(ins.aux),
+                               pos: pos, view: m.curView))
             inc pc
 
         of opDefer:
-            m.log.add(LogEntry(kind: lgDefer, name: ins.arg, pos: pos))
+            m.log.add(LogEntry(kind: lgDefer, name: ins.arg, pos: pos,
+                               view: m.curView))
             inc pc
 
         of opCutFrame:
@@ -259,54 +451,49 @@ proc run*(prog: Program, input: seq[Rune]): MatchResult =
             if m.cuts.len > 0: m.cuts[^1] = true
             inc pc
 
-        of opMatch:
-            return MatchResult(ok: true, pos: pos, log: m.log,
-                               failPos: m.failPos, expected: m.expected)
+        of opStrTerm:
+            raise newException(ValueError, "carpintero vm: opStrTerm is unused")
 
-        of opTypeTerm, opWordTerm, opStrTerm, opQuote, opInto, opIntoEnd:
-            raise newException(ValueError,
-                "carpintero vm: " & $ins.op & " needs block input, which this " &
-                "build does not carry yet")
+        of opMatch:
+            result.ok = true
+            result.pos = pos
+            result.failPath = m.failPath
+            result.expected = m.expected
+            # captures materialise here, where the borrowed views are still
+            # valid and only the log that survived is left
+            var stack: seq[(int, LogEntry)] = @[]
+            var collecting: seq[int] = @[]
+            for e in m.log:
+                case e.kind
+                of lgOpen:
+                    result.caps.add(Capture(name: prog.names[e.name]))
+                    stack.add((result.caps.len - 1, e))
+                    if e.cap == ckCollect: collecting.add(result.caps.len - 1)
+                of lgClose:
+                    if stack.len == 0: continue
+                    let (idx, opener) = stack[^1]
+                    stack.setLen(stack.len - 1)
+                    var v: CapValue
+                    case src.kind
+                    of skText:
+                        v.text = $m.src.text[opener.pos ..< e.pos]
+                    of skBlock:
+                        let view = m.viewReg[opener.view]
+                        if opener.pos < e.pos:
+                            v.items = view[][opener.pos ..< e.pos]
+                    result.caps[idx].value = v
+                    if opener.cap == ckCollect:
+                        if collecting.len > 0:
+                            collecting.setLen(collecting.len - 1)
+                    elif opener.cap == ckKeep:
+                        if collecting.len > 0:
+                            result.caps[collecting[^1]].collected.add(v)
+                of lgDefer:
+                    result.defers.add(e.name)
+            return result
 
 proc run*(prog: Program, input: string): MatchResult {.inline.} =
-    run(prog, input.toRunes)
+    run(prog, Source(kind: skText, text: input.toRunes))
 
-# ── materialising captures ───────────────────────────────────────────────
-# Only after overall success, and only from the log that survived. The log is
-# a flat open/close sequence, so one walk with a stack rebuilds the nesting.
-
-type
-    Capture* = object
-        name*: string
-        value*: string
-        collected*: seq[string]
-
-proc captures*(prog: Program, input: seq[Rune], r: MatchResult): seq[Capture] =
-    if not r.ok: return @[]
-    var stack: seq[(int, LogEntry)] = @[]     # index into result, opener
-    var collecting: seq[int] = @[]            # result indices of open collects
-    for e in r.log:
-        case e.kind
-        of lgOpen:
-            var c = Capture(name: prog.names[e.name])
-            result.add(c)
-            stack.add((result.len - 1, e))
-            if e.cap == ckCollect: collecting.add(result.len - 1)
-        of lgClose:
-            if stack.len == 0: continue
-            let (idx, opener) = stack[^1]
-            stack.setLen(stack.len - 1)
-            let text = $input[opener.pos ..< e.pos]
-            result[idx].value = text
-            if opener.cap == ckCollect:
-                if collecting.len > 0: collecting.setLen(collecting.len - 1)
-            elif opener.cap == ckKeep:
-                if collecting.len > 0:
-                    result[collecting[^1]].collected.add(text)
-        of lgDefer:
-            discard
-
-proc asTable*(caps: seq[Capture]): Table[string, string] =
-    ## The shape `scan` returns: one name to one span, last match winning.
-    for c in caps:
-        if c.name.len > 0: result[c.name] = c.value
+proc run*(prog: Program, input: seq[Item]): MatchResult {.inline.} =
+    run(prog, Source(kind: skBlock, root: input))

@@ -160,7 +160,7 @@ suite "captures":
     test "a failed scan reports where":
         let r = scan(date, "2026-08-0x")
         check not r.ok
-        check r.failPos == 9
+        check r.failPath == @[9'i32]
 
     test "captures roll back with a dead alternative":
         # the divergence from Rebol: a capture made in an arm that later
@@ -237,3 +237,107 @@ suite "prefix scanning":
                      "123abc", prefix = true)
         check r.ok
         check r.reached == 3
+
+# ── block input ──────────────────────────────────────────────────────────
+# Arturo's lexer has already turned source into typed values, so the grammar
+# only supplies structure. These are the cases the interpreted suite covers
+# in its "blocks" and "into" sections.
+
+proc typ(name: string): Node = Node(kind: nkTypeTerm, name: name)
+proc wrd(name: string): Node = Node(kind: nkWordTerm, name: name)
+proc cap(name: string, body: Node): Node =
+    Node(kind: nkCap, capName: name, capBody: body)
+
+suite "block terminals":
+    test "a type terminal matches by type":
+        let gg = g(alt(sq(typ(":integer"))))
+        check scanQ(gg, @[iInt(42)])
+        check not scanQ(gg, @[iStr("42")])
+
+    test "a literal word matches by name":
+        let gg = g(alt(sq(wrd("function"))))
+        check scanQ(gg, @[iWord("function")])
+        check not scanQ(gg, @[iWord("method")])
+
+    test "a string literal matches one string element, not its characters":
+        let gg = g(alt(sq(str("ab"))))
+        check scanQ(gg, @[iStr("ab")])
+        check not scanQ(gg, @[iStr("a"), iStr("b")])
+
+    test "skip takes any single value":
+        check scanQ(g(alt(sq(Node(kind: nkSkip), Node(kind: nkSkip)))),
+                    @[iInt(1), iBlock(iInt(2))])
+
+suite "into":
+    test "into descends and must match the nested block in full":
+        let gg = g(alt(sq(Node(kind: nkInto,
+                               body: alt(sq(typ(":integer"), typ(":integer")))))))
+        check scanQ(gg, @[iBlock(iInt(1), iInt(2))])
+        check not scanQ(gg, @[iBlock(iInt(1), iInt(2), iInt(3))])
+        check not scanQ(gg, @[iInt(1)])
+
+    test "a capture inside into spans the nested block":
+        let gg = g(alt(sq(Node(kind: nkInto,
+                               body: alt(sq(cap("inner", alt(sq(typ(":integer"),
+                                                                typ(":integer"))))))))))
+        let r = scan(gg, @[iBlock(iInt(7), iInt(8))])
+        check r.ok
+        check r.captures["inner"].items == @[iInt(7), iInt(8)]
+
+    test "a failure inside into reports a path of indices":
+        let gg = g(alt(sq(Node(kind: nkSkip),
+                          Node(kind: nkInto, body: alt(sq(typ(":integer"),
+                                                          typ(":string")))))))
+        let r = scan(gg, @[iInt(0), iBlock(iInt(1), iInt(2))])
+        check not r.ok
+        check r.failPath == @[1'i32, 1'i32]
+
+suite "matching Arturo source":
+    # greet: function [name] [print name]
+    let src = @[iLabel("greet"), iWord("function"),
+                iBlock(iWord("name")), iBlock(iWord("print"), iWord("name"))]
+
+    let funcdef = alt(sq(
+        cap("name", alt(sq(typ(":label")))),
+        wrd("function"),
+        cap("params", alt(sq(typ(":block")))),
+        cap("body", alt(sq(typ(":block"))))))
+
+    test "the proposal's funcdef example":
+        let r = scan(g(funcdef), src)
+        check r.ok
+        check r.captures["name"].items == @[iLabel("greet")]
+        check r.captures["params"].items == @[iBlock(iWord("name"))]
+
+    test "a recursive walk finds definitions at every depth":
+        # walk: [any [keep defn | into walk | skip]], the corpus runner's shape.
+        # `defn` deliberately stops before the body so the walk can descend
+        # into it and find definitions nested inside.
+        let defn = alt(sq(typ(":label"), wrd("function"), typ(":block")))
+        let walk = alt(sq(Node(kind: nkAny, body: alt(
+            sq(Node(kind: nkKeep, body: rule("defn"))),
+            sq(Node(kind: nkInto, body: rule("walk"))),
+            sq(Node(kind: nkSkip))))))
+        let gg = g(alt(sq(Node(kind: nkCollect, capName: "defs",
+                               capBody: rule("walk")))),
+                   {"walk": walk, "defn": defn})
+
+        # one top-level definition whose body holds another
+        let nested = @[
+            iLabel("outer"), iWord("function"), iBlock(),
+            iBlock(iLabel("inner"), iWord("function"), iBlock(), iBlock())]
+        let r = scan(gg, nested)
+        check r.ok
+        check r.collected["defs"].len == 2
+
+suite "quote":
+    test "quote matches a value literally":
+        let gg = g(alt(sq(Node(kind: nkQuote, literal: "9"), Node(kind: nkSkip))))
+        check scanQ(gg, @[iInt(9), iInt(1)])
+        check not scanQ(gg, @[iInt(8), iInt(1)])
+
+    test "quote matches a symbolliteral, which the interpreter cannot":
+        # bugs/symbolliteral-equality.art: on 0.10.0 `'+ = '+` is false, so the
+        # interpreted matcher cannot match one. Structural equality here can.
+        let gg = g(alt(sq(Node(kind: nkQuote, literal: "'+"))))
+        check scanQ(gg, @[iSymLit("+")])

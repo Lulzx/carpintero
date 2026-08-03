@@ -17,32 +17,63 @@ for, and the reason the two halves share no code.
 
 ## What runs
 
-Text input, through the whole of the control flow: literals, characters,
-charsets, `skip`, `end`, ordered choice, `some`, `any`, `opt`, `N rule`,
-`between`, `not`, `ahead`, `to`, `thru`, `capture`, `collect` with `keep`,
-`cut`, named and mutually recursive rules, the left-recursion pre-pass, and
-farthest-failure reporting with an expected-set.
+Both input kinds, through the whole of the control flow: literals,
+characters, charsets, `skip`, `end`, ordered choice, `some`, `any`, `opt`,
+`N rule`, `between`, `not`, `ahead`, `to`, `thru`, `capture`, `collect` with
+`keep`, `cut`, named and mutually recursive rules, the left-recursion
+pre-pass, and farthest-failure reporting with an expected-set.
 
-29 tests in `tests/test_vm.nim`, written from the cases the interpreted suite
+Block input adds `:type` and `'word` terminals, `quote`, and `into`, which
+swaps the sequence being matched partway through and puts it back on every
+path out, backtracking included. A capture taken inside a descent spans the
+nested block rather than the outer one, and a failure inside one is located
+by a path of indices instead of a single offset.
+
+The shape that matters is the recursive tree walk, since it is what makes a
+grammar useful against source:
+
+```
+walk: [any [keep defn | into walk | skip]]
+```
+
+Both engines find the same two definitions in
+`[outer: function [] [inner: function [] []]]`, at different depths.
+
+40 tests in `tests/test_vm.nim`, written from the cases the interpreted suite
 covers rather than from the implementation, so a disagreement between them is
 a disagreement with the manual.
 
 ## What does not
 
-Block input. `into`, `:type` terminals, `'word` terminals and `quote` have
-opcodes and compile, but the machine raises on them, because the input is
-still a `seq[Rune]` rather than a sequence of values. Block matching is the
-phase the proposal calls the reason the package exists, so it is next.
-
-`defer` blocks reach the capture log and are never run, since running one
-means calling back into Arturo. Memoization is not wired up. Neither is the
+`defer` blocks reach the capture log and come back in the result as host
+block ids in match order, but nothing runs them, since running one means
+calling back into Arturo. Memoization is not wired up. Neither is the
 `opSpan` charset-run optimisation, which is emitted nowhere yet.
+
+Nothing is wired into Arturo, so the `Item` type stands in for `Value` and
+the adapter between them is unwritten.
+
+## Deliberate divergences
+
+Two places where the compiled core does not reproduce the interpreted one,
+both recorded in tests so they cannot drift by accident.
+
+`quote` compares structurally. The interpreted matcher compares with Arturo's
+`=`, and on 0.10.0 a `:symbolliteral` is not equal to itself
+(`../bugs/symbolliteral-equality.art`), so `quote '+` cannot match a `'+`
+there and can here. That is the interpreter's bug rather than a semantic
+choice, so the compiled core is not copying it.
+
+A prefix that matched and stopped short reports `end of input` at the
+position it reached. The interpreted matcher gained the same behaviour once
+the compiled version made the gap obvious.
 
 ## Layout
 
 | File | What it holds |
 | --- | --- |
 | `charset.nim` | ASCII bitmap plus sorted ranges above it, union, intersection, complement |
+| `items.nim` | Block elements: the subset of Arturo's `Value` the matcher inspects |
 | `instructions.nim` | The opcodes, the program with its literal pools, and a disassembler |
 | `grammar.nim` | The rule tree, and nullability by fixpoint |
 | `compile.nim` | Tree to program, and Ford's well-formedness check |
@@ -72,9 +103,17 @@ without consuming, which has to be a runtime comparison. Compiling
 nullability first means the guarded form of `PartialCommit` is emitted only
 for the loops that can need it, and every other loop keeps the plain one.
 
-**`into` switches the input mid-match**, which LPeg has no notion of. The
-opcodes are defined and the backtrack frame has room for the input stack
-depth; the descent itself waits on block input.
+**`into` switches the input mid-match**, which LPeg has no notion of. A
+backtrack frame therefore saves the descent depth and the active sequence
+alongside the position, and every path out of a descent restores them,
+including the failing ones.
+
+It also has to stay out of the left-recursion check. `into` starts its
+operand at position 0 of a strictly smaller input, so descent is progress and
+cannot left-recurse; following it during head analysis rejects every
+recursive tree walk, which is the most useful shape block input has. The
+interpreted pre-pass excludes it for the same reason, and the compiled one
+did not until a walk that works there was rejected here.
 
 ## A question the translation raised
 

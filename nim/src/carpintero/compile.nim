@@ -150,11 +150,11 @@ proc emit(c: var Ctx, n: Node) =
             emitAlt(c, n, guarded = false)
 
     of nkStr:
+        # A one-character string stays a string, and is not folded into
+        # opChar: against block input `"a"` matches a `:string` element and
+        # `'a'` matches a `:char` element, so the two cannot share an opcode.
         if n.text.len == 0: return          # matches without consuming
-        if n.text.len == 1:
-            discard c.p.add(opChar, int32(n.text[0]))
-        else:
-            discard c.p.add(opStr, c.p.poolStr(n.text))
+        discard c.p.add(opStr, c.p.poolStr(n.text))
 
     of nkChar:
         discard c.p.add(opChar, n.cp)
@@ -302,9 +302,17 @@ proc headsOf(n: Node, nmap: Table[string, bool], acc: var seq[string]) =
     of nkAlt:
         for it in n.items: headsOf(it, nmap, acc)
     of nkNot, nkAhead, nkTo, nkThru:
+        # all three probe their operand at the current position, so a rule
+        # reached through one of them can still left-recurse
         headsOf(n.child, nmap, acc)
-    of nkSome, nkAny, nkOpt, nkKeep, nkInto:
+    of nkSome, nkAny, nkOpt, nkKeep:
         headsOf(n.child, nmap, acc)
+    of nkInto:
+        # `into` starts its operand at position 0 of a strictly smaller
+        # input, so descent is progress and cannot left-recurse. Following it
+        # here would reject every recursive tree walk, which is the single
+        # most useful shape block input has.
+        discard
     of nkRep:
         if n.count > 0: headsOf(n.repBody, nmap, acc)
     of nkBetween:
