@@ -59,16 +59,29 @@ type
         text*: string         ## text input
         items*: seq[Item]     ## block input
 
+    CapSpan* = object
+        ## Where a capture came from, rather than what it held. The caller
+        ## owns the input, so it can slice its own values and keep their
+        ## identity instead of taking a reconstruction of them.
+        path*: seq[int32]     ## `into` descent indices, outermost first
+        start*, finish*: int32
+
     Capture* = object
         name*: string
         kind*: CapKind        ## a collect reports its list even when empty
         value*: CapValue
+        span*: CapSpan
         collected*: seq[CapValue]
+        spans*: seq[CapSpan]
 
     MatchResult* = object
         ok*: bool
         pos*: int32
         caps*: seq[Capture]
+        order*: seq[int]      ## cap indices in the order they closed, which
+                              ## is the order the interpreted matcher logs
+                              ## them and therefore the order its result
+                              ## dictionary carries
         defers*: seq[int32]   ## host block ids, in match order, success only
         failPath*: seq[int32] ## descent indices, innermost last
         expected*: seq[string]
@@ -95,6 +108,7 @@ type
         src: Source
         views: seq[View]      ## active descents; empty at the top level
         viewReg: seq[ptr seq[Item]]
+        viewPaths: seq[seq[int32]]   ## the descent path of each registered view
         curView: int32
         stack: seq[Frame]
         log: seq[LogEntry]
@@ -155,6 +169,7 @@ proc run*(prog: Program, src: Source): MatchResult =
         m.viewReg.add(nil)
     of skBlock:
         m.viewReg.add(addr m.src.root)
+    m.viewPaths.add(@[])
     m.curView = 0
 
     var pc = prog.entry
@@ -332,6 +347,7 @@ proc run*(prog: Program, src: Source): MatchResult =
             else:
                 let nested = addr m.curItems[][pos].items
                 m.viewReg.add(nested)
+                m.viewPaths.add(m.viewPaths[m.curView] & @[pos])
                 m.views.add(View(items: nested, outerPos: pos,
                                  prevView: m.curView))
                 m.curView = int32(m.viewReg.len - 1)
@@ -486,13 +502,18 @@ proc run*(prog: Program, src: Source): MatchResult =
                         let view = m.viewReg[opener.view]
                         if opener.pos < e.pos:
                             v.items = view[][opener.pos ..< e.pos]
+                    let sp = CapSpan(path: m.viewPaths[opener.view],
+                                     start: opener.pos, finish: e.pos)
                     result.caps[idx].value = v
+                    result.caps[idx].span = sp
+                    result.order.add(idx)
                     if opener.cap == ckCollect:
                         if collecting.len > 0:
                             collecting.setLen(collecting.len - 1)
                     elif opener.cap == ckKeep:
                         if collecting.len > 0:
                             result.caps[collecting[^1]].collected.add(v)
+                            result.caps[collecting[^1]].spans.add(sp)
                 of lgDefer:
                     result.defers.add(e.name)
             return result

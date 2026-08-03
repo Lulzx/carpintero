@@ -1,0 +1,55 @@
+;; breakdown.art — where the FFI path actually spends its time.
+import ./"fast.art"!
+
+defn:  [capture 'name :label ['function | 'method | quote $] opt :attribute capture 'params :block]
+walk:  [any [ keep defn | into walk | skip ]]
+allDefns: [collect 'found walk]
+
+root: first arg
+files: select list.recursive.relative root 'f -> "art" = last split.by:"." f
+blocks: []
+i: 0
+n: size files
+while [i < n][
+    blk: []
+    ok: false
+    e: try [ blk: loadSafe root ++ "/" ++ files\[i]  ok: true ]
+    if ok [ blocks: append blocks @[blk] ]
+    i: i + 1
+]
+print ~"corpus: |size blocks| files"
+
+T: #[n: 0]
+tTree: benchmark.get [
+    j: 0
+    m: size blocks
+    while [j < m][
+        discard map blocks\[j] 'e -> itemTree e
+        j: j + 1
+    ]
+]
+trees: map blocks 'b -> #[kind: "block" v: map b 'e -> itemTree e]
+
+tJson: benchmark.get [
+    j: 0
+    m: size trees
+    while [j < m][
+        discard jsonString trees\[j]
+        j: j + 1
+    ]
+]
+jsons: map trees 'tr -> jsonString tr
+gj: grammarJson allDefns
+
+tCall: benchmark.get [
+    j: 0
+    m: size jsons
+    while [j < m][
+        discard call.external: carpinteroLib .expect: :string 'cpScan @[gj jsons\[j]]
+        j: j + 1
+    ]
+]
+
+print ["  itemTree (Value to tagged dicts):" tTree]
+print ["  jsonString (dicts to text):      " tJson]
+print ["  the call, matching included:     " tCall]

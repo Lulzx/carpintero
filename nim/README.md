@@ -88,6 +88,54 @@ Both engines find the same two definitions in
 covers rather than from the implementation, so a disagreement between them is
 a disagreement with the manual.
 
+## Calling it from Arturo
+
+Arturo cannot gain a builtin without changing Arturo, and this package
+changes nothing in the interpreter. What it can do is call a shared library,
+so that is the seam:
+
+```
+cd nim
+nim c --app:lib -d:release -o:libcarpintero.dylib src/carpintero_ffi.nim
+arturo nim/adapter/try-fast.art ../arturo
+```
+
+`adapter/fast.art` defines `scanFast`, which takes the arguments `scan`
+takes and returns the shape `scan` returns, with the matching done in the
+compiled core. It agrees with `scan` on the small cases and on all 168
+corpus files, capture order included.
+
+Because `call.external` carries scalars and nothing else, the grammar and
+the input cross as JSON. What comes back is spans rather than values: where
+each capture started and ended, and which `into` descent it was inside.
+Arturo then slices its own input from those coordinates, so a captured value
+keeps its identity instead of being rebuilt, and the kinds this library
+models opaquely survive untouched.
+
+### What that costs, and what it argues
+
+Over the corpus, `scanFast` takes 15.3 seconds against `scan`'s 19.8. The
+compiled core scans the same corpus in 28 milliseconds, so almost none of
+that is matching. `adapter/breakdown.art` says where it goes:
+
+| Stage | Time |
+| --- | --- |
+| `itemTree`, Arturo values to tagged dictionaries | 1.5 s |
+| `jsonString`, dictionaries to text | 13.8 s |
+| the call itself, JSON parsing and matching included | 0.13 s |
+
+Crossing the boundary and matching costs 134 milliseconds. Building the text
+to cross it with costs 13.8 seconds, a hundred times the work it is feeding,
+and all of it in the interpreter the compiled core exists to get away from.
+
+That is the argument for a real builtin rather than a bridge, and it is the
+one thing an FFI experiment can establish that a benchmark cannot: the
+engine is not the problem, and no amount of work on the engine will fix
+this. A builtin would take the `Value` block it was handed and match on it
+in place, with no serialisation at either end, which is the 28 milliseconds.
+Adding one means a `src/library/Parse.nim` and a line in `src/vm/vm.nim`,
+which is a change to Arturo and therefore upstream's call to make.
+
 ## What does not
 
 `defer` blocks reach the capture log and come back in the result as host
@@ -95,9 +143,10 @@ block ids in match order, but nothing runs them, since running one means
 calling back into Arturo. Memoization is not wired up. Neither is the
 `opSpan` charset-run optimisation, which is emitted nowhere yet.
 
-Nothing is wired into Arturo as a builtin. The `Item` type stands in for
-`Value`, and the adapter between them goes through JSON rather than through
-memory, which is right for testing and wrong for shipping.
+Nothing is wired into Arturo as a builtin, and nothing here changes Arturo.
+The `Item` type stands in for `Value`, and everything crossing between them
+goes through JSON, which the measurement above shows is the whole cost of
+the current bridge.
 
 The corpus run compares matching, not diagnostics: the exported answer
 carries success, captures and collections, but not the farthest-failure path
@@ -139,6 +188,7 @@ the compiled version made the gap obvious.
 | `compile.nim` | Tree to program, and Ford's well-formedness check |
 | `vm.nim` | The matcher loop, the capture log, and materialising captures |
 | `carpintero.nim` | `scan` and `scan?` over the above |
+| `carpintero_ffi.nim` | The shared-library entry points Arturo calls |
 
 `tests/dis.nim` prints the program for one grammar. The compiler is the part
 most likely to be wrong, and a listing is the cheapest way to see what it

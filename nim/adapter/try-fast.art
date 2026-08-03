@@ -1,0 +1,84 @@
+;; try-fast.art — scanFast against scan, on both input kinds.
+;;
+;;     arturo nim/adapter/try-fast.art [path-to-arturo-checkout]
+;;
+;; Without a checkout it runs the small cases. With one it runs the corpus
+;; grammar over the whole tree in both engines, compares every answer, and
+;; times both, including what the Arturo side spends serialising.
+
+import ./"fast.art"!
+
+digit: charset "0-9"
+lower: charset "a-z"
+
+date:  [capture 'year [4 digit] "-" capture 'month [2 digit] "-" capture 'day [2 digit]]
+words: [collect 'words [some [keep [some lower] | skip]]]
+
+defn:  [capture 'name :label ['function | 'method | quote $] opt :attribute capture 'params :block]
+walk:  [any [ keep defn | into walk | skip ]]
+allDefns: [collect 'found walk]
+
+R: #[bad: 0 n: 0]
+
+same?: function [label a b][
+    R\n: R\n + 1
+    ok: (null? a)? -> null? b -> and? [not? null? b] [(to :string a) = to :string b]
+    unless ok [
+        R\bad: R\bad + 1
+        print ["  DIFFER" label]
+        print ["    interpreted:" a]
+        print ["    compiled:   " b]
+    ]
+    ok
+]
+
+print "small cases:"
+discard same? "date"     scan "2026-08-03" date  scanFast "2026-08-03" date
+discard same? "date-bad" scan "2026-08-0x" date  scanFast "2026-08-0x" date
+discard same? "words"    scan "one, two" words   scanFast "one, two" words
+
+bd: [greet: function [n] []]
+bg: [capture 'name :label 'function capture 'params :block skip]
+discard same? "block-defn" scan bd bg  scanFast bd bg
+discard same? "into" scan [[1 2]] [into [:integer :integer]]  scanFast [[1 2]] [into [:integer :integer]]
+print ~"  |R\n - R\bad| of |R\n| agreed"
+
+unless empty? arg [
+    root: first arg
+    files: select list.recursive.relative root 'f -> "art" = last split.by:"." f
+    blocks: []
+    i: 0
+    n: size files
+    while [i < n][
+        blk: []
+        ok: false
+        e: try [ blk: loadSafe root ++ "/" ++ files\[i]  ok: true ]
+        if ok [ blocks: append blocks @[blk] ]
+        i: i + 1
+    ]
+    print ""
+    print ~"corpus: |size blocks| files"
+
+    T: #[a: 0 b: 0]
+    sInt: benchmark.get [
+        j: 0
+        m: size blocks
+        while [j < m][
+            r: scan blocks\[j] allDefns
+            unless null? r [ T\a: T\a + size r\found ]
+            j: j + 1
+        ]
+    ]
+    sFast: benchmark.get [
+        j: 0
+        m: size blocks
+        while [j < m][
+            r: scanFast blocks\[j] allDefns
+            unless null? r [ T\b: T\b + size r\found ]
+            j: j + 1
+        ]
+    ]
+    print ["  interpreted:" sInt "|" T\a "definitions"]
+    print ["  compiled:   " sFast "|" T\b "definitions"]
+    print ["  same count: " T\a = T\b]
+]

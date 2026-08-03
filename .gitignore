@@ -1,7 +1,9 @@
 .DS_Store
 *.output
 docs/
+nim/*.dylib
 nim/adapter/cases.json
+nim/libcarpintero.dylib
 nim/nimcache/
 nim/tests/differential
 nim/tests/dis

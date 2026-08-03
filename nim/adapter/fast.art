@@ -1,0 +1,153 @@
+;; fast.art — the compiled core, called from Arturo.
+;;
+;;     import ./"nim/adapter/fast.art"!
+;;     scanFast input rule
+;;
+;; Arturo cannot gain a builtin without changing Arturo, but it can call a
+;; shared library, so that is the seam. scanFast answers the same question
+;; as scan and returns the same shape, while the matching happens in the
+;; compiled core.
+;;
+;; Build the library first:
+;;
+;;     cd nim
+;;     nim c --app:lib -d:release -o:libcarpintero.dylib src/carpintero_ffi.nim
+;;
+;; The grammar and the input cross as JSON, because call.external carries
+;; scalars and nothing else. What comes back is spans rather than values:
+;; where each capture started and ended, and which into descent it was
+;; inside. This side then slices its own input, so a captured value keeps
+;; its exact identity instead of being rebuilt from a serialization, and the
+;; types the library models opaquely survive the round trip untouched.
+
+import ./"export.art"!
+
+;; ── JSON, as a string ────────────────────────────────────────────────
+;; write.json needs a file, and the point of calling a library rather than
+;; writing one is to avoid the filesystem, so the rendering is here.
+
+JQ: to :char 34
+JB: to :char 92
+
+jsonEscape: function [s][
+    out: ""
+    i: 0
+    n: size s
+    while [i < n][
+        c: s\[i]
+        cp: to :integer c
+        done: false
+        if c = JQ [ out: out ++ JB ++ JQ  done: true ]
+        if and? [not? done] [c = JB]  [ out: out ++ JB ++ JB  done: true ]
+        if and? [not? done] [cp = 10] [ out: out ++ JB ++ "n"  done: true ]
+        if and? [not? done] [cp = 9]  [ out: out ++ JB ++ "t"  done: true ]
+        if and? [not? done] [cp = 13] [ out: out ++ JB ++ "r"  done: true ]
+        if and? [not? done] [cp < 32] [
+            out: out ++ JB ++ "u00" ++ pad.left.with:`0` (to :string .format:"x" cp) 2
+            done: true
+        ]
+        unless done [ out: out ++ to :string c ]
+        i: i + 1
+    ]
+    out
+]
+
+jsonString: function [v][
+    t: to :string type v
+    if t = "dictionary" [
+        ks: keys v
+        parts: []
+        i: 0
+        n: size ks
+        while [i < n][
+            k: ks\[i]
+            parts: append parts @[JQ ++ (jsonEscape k) ++ JQ ++ ":" ++ jsonString v\[k]]
+            i: i + 1
+        ]
+        return "{" ++ (join.with: "," parts) ++ "}"
+    ]
+    if t = "block" [
+        return "[" ++ (join.with: "," map v 'e -> jsonString e) ++ "]"
+    ]
+    if t = "string"   -> return JQ ++ (jsonEscape v) ++ JQ
+    if t = "integer"  -> return to :string v
+    if t = "floating" -> return to :string v
+    if t = "logical"  -> return (v)? -> "true" -> "false"
+    if t = "null"     -> return "null"
+    JQ ++ (jsonEscape to :string v) ++ JQ
+]
+
+;; ── the library ──────────────────────────────────────────────────────
+
+LIB: #[p: ""]
+
+;; the library is built one level up from this file, so the path is derived
+;; rather than configured; assign LIB\p to point somewhere else
+carpinteroLib: function [][
+    if LIB\p = "" [ LIB\p: relative "../libcarpintero.dylib" ]
+    LIB\p
+]
+
+;; ── scanning ─────────────────────────────────────────────────────────
+
+;; the library caches one compiled program per distinct grammar string, so
+;; the text is built once per grammar on this side too
+GJ: #[]
+
+grammarJson: function [rule][
+    k: to :string rule
+    unless key? GJ k [ GJ\[k]: jsonString grammarTree rule ]
+    GJ\[k]
+]
+
+;; walk a path of into-descent indices to the block a span refers to
+spanSource: function [input path][
+    src: input
+    i: 0
+    n: size path
+    while [i < n][
+        src: src\[path\[i]]
+        i: i + 1
+    ]
+    src
+]
+
+spanValue: function [input isblk span][
+    src: spanSource input span\path
+    f: span\from
+    t: span\to
+    if f = t -> return (isblk)? -> [] -> ""
+    ; slice of a string is a string and slice of a block is a block, which
+    ; is what scan returns for each input kind
+    slice src f t - 1
+]
+
+;; scanFast: the contract scan has, a dictionary of captures or null.
+scanFast: function [input rule][
+    isblk: block? input
+    inp: (isblk)? -> #[kind: "block" v: map input 'e -> itemTree e]
+                  -> #[kind: "text" v: input]
+
+    reply: call.external: carpinteroLib
+                .expect: :string
+                'cpScan @[grammarJson rule  jsonString inp]
+
+    r: read.json.string reply
+    if key? r 'error [ panic ~"carpintero (compiled): |r\error|" ]
+    unless r\ok -> return null
+
+    ;; captures arrive as an array in the order they closed, which is the
+    ;; order the interpreted matcher reports them in
+    out: #[]
+    caps: r\captures
+    i: 0
+    n: size caps
+    while [i < n][
+        c: caps\[i]
+        nm: c\name
+        if key? c 'items [ out\[nm]: map c\items 's -> spanValue input isblk s ]
+        unless key? c 'items [ out\[nm]: spanValue input isblk c\span ]
+        i: i + 1
+    ]
+    out
+]

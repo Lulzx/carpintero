@@ -16,6 +16,10 @@ type
         ok*: bool
         captures*: Table[string, CapValue]
         collected*: Table[string, seq[CapValue]]
+        captureSpans*: Table[string, CapSpan]
+        collectedSpans*: Table[string, seq[CapSpan]]
+        names*: seq[string]    ## capture names in close order, as the
+                               ## interpreted matcher reports them
         reached*: int          ## how far a prefix scan got
         defers*: seq[int32]    ## host block ids to run, in match order
         failPath*: seq[int32]
@@ -50,15 +54,19 @@ proc scan*(prog: Program, src: Source, prefix = false): ScanResult =
         return
     result.ok = true
     result.defers = r.defers
-    for c in r.caps:
+    for idx in r.order:
+        let c = r.caps[idx]
         if c.name.len == 0: continue
+        if c.name notin result.names: result.names.add(c.name)
         # a collect reports its list, empty or not; anything else reports the
         # span it crossed. Splitting on whether the value happens to be a list
         # cannot work for block input, where an ordinary capture is one too.
         if c.kind == ckCollect:
             result.collected[c.name] = c.collected
+            result.collectedSpans[c.name] = c.spans
         else:
             result.captures[c.name] = c.value
+            result.captureSpans[c.name] = c.span
 
 proc scan*(prog: Program, input: string, prefix = false): ScanResult {.inline.} =
     scan(prog, Source(kind: skText, text: input.toRunes), prefix)
