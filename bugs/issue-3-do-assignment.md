@@ -8,7 +8,7 @@
 
 `do someBlock` works inside a function called from top level, but when the
 `do`-executing function is itself called from another function, a block
-containing an assignment — plain (`x: 3`) or path (`G\n: 3`) — makes the
+containing an assignment, plain (`x: 3`) or path (`G\n: 3`), makes the
 interpreter exit 1 silently: no output, no error message.
 
 Blocks containing only expressions or calls to functions of arity ≥ 1 work
@@ -44,12 +44,13 @@ Prints `2`, then `3`, then `never reached`.
 
 ## Root cause hypothesis, and a reliable workaround
 
-The common factor across every crashing shape is not the assignment: it is
-that the block's **last expression produces no value** (an assignment, a
-`set` call, a call to a function whose own body ends value-less). `do` of
-such a block appears to leave the enclosing frame expecting a value that
-never arrives; whether that corrupts anything is contextual, which is why
-the same shape sometimes works at one nesting depth and dies at another.
+The common factor across every crashing shape is that the block's **last
+expression produces no value** (an assignment, a `set` call, a call to a
+function whose own body ends value-less), rather than the assignment
+itself. `do` of such a block appears to leave the enclosing frame
+expecting a value that never arrives. Whether that corrupts anything is
+contextual, which is why the same shape sometimes works at one nesting
+depth and dies at another.
 
 Padding the block with a trailing value before evaluation makes every
 shape below work, at any depth tested:

@@ -2,7 +2,7 @@
 
 The complete reference for the dialect. If you are here to *learn* it,
 [TUTORIAL.md](TUTORIAL.md) is the guided path and this is what you reach
-for afterwards; the design rationale lives in
+for afterwards. The design rationale lives in
 [proposal.md](proposal.md). Everything here is exercised by `demo.art`
 (71 checks, the readable tour) and `tests.art` (354 checks, the
 regression suite) against Arturo 0.10.0.
@@ -127,8 +127,8 @@ only).
 
 `quote` compares with `=`, which is exact for every type except one: on
 Arturo 0.10.0 a `:symbolliteral` is not equal to itself, so `[quote '+]`
-can never match a `'+`. The `:symbolliteral` type terminal is unaffected
-— match the type and inspect the capture. See
+can never match a `'+`. The `:symbolliteral` type terminal is
+unaffected: match the type and inspect the capture. See
 [bug 4](bugs/README.md#4-symbolliteral-equalityart-a-symbolliteral-is-not-equal-to-itself).
 
 ### Charsets
@@ -145,7 +145,7 @@ literal character. An inverted range (`"z-a"`) panics.
 
 The `charset` call belongs **outside** the rule, always. Rule blocks are
 never evaluated as code, so `[some charset "a-z"]` does not call
-anything — the block simply holds the word `charset`, which resolves to
+anything. The block simply holds the word `charset`, which resolves to
 the builtin function, which is not a rule. The grammar pre-pass catches
 this and names the word:
 
@@ -246,9 +246,8 @@ so recursive descent is progress, not left recursion.
 
 #### Walking a whole tree
 
-The idiom for "find every X at any depth" is three alternatives —
-match it, descend into it, or step over it — in a rule that names
-itself:
+The idiom for "find every X at any depth" is three alternatives (match
+it, descend into it, or step over it) in a rule that names itself:
 
 ```red
 defn: [capture 'name :label 'function capture 'params :block]
@@ -257,8 +256,8 @@ walk: [any [keep defn | into walk | skip]]
 scan src [collect 'found walk]
 ```
 
-Two things about that shape are load-bearing, and getting either wrong
-produces a grammar that works and quietly under-reports:
+Two things about that shape matter, and getting either wrong produces
+a grammar that works and quietly under-reports:
 
 - The **`collect` wraps the walk from outside** and the recursion lives
   in `walk`. A `collect` that named itself would open a fresh
@@ -266,7 +265,7 @@ produces a grammar that works and quietly under-reports:
   inner one instead of accumulating into the outer.
 - **`defn` stops short of the body block.** It consumes up to the
   parameter list and no further, which leaves the body for the next
-  step of the walk to descend into — so definitions nested inside
+  step of the walk to descend into, so definitions nested inside
   function bodies are found too. Use `ahead` if you need to *check* for
   something without consuming it. A rule that swallowed the body would
   find only the outermost definition of each nest, which on Arturo's
@@ -280,8 +279,8 @@ passes `cut`, a failure later in that alternative fails the whole
 choice instead of trying the next arm.
 
 ```red
-scan? "ab" ["a" cut "x" | "ab"]              ; false — second arm never tried
-scan? "ab" [["a" cut "x" | "z"] | "ab"]      ; true — cut is local to its block
+scan? "ab" ["a" cut "x" | "ab"]              ; false, second arm never tried
+scan? "ab" [["a" cut "x" | "z"] | "ab"]      ; true, cut is local to its block
 ```
 
 Use it after a committed keyword, where trying other alternatives could
@@ -312,7 +311,7 @@ evaluation, which sidesteps an interpreter bug (see
 
 An escape block evaluates in a scope of its own, so a plain assignment
 inside one does not reach a variable outside it. To accumulate across a
-scan, mutate a value that already exists — a **path assignment into a
+scan, mutate a value that already exists. A **path assignment into a
 dictionary** is the reliable form:
 
 ```red
@@ -364,8 +363,7 @@ e2: [e1 "x" | e1 "y"]
 
 costs 2^12 rule invocations bare (about 165 ms interpreted) and drops
 to about 1.5 ms with memoization. Real grammars are effectively linear.
-This is what pathological looks like, and `examples/bench.art` will
-show you both numbers on your machine.
+`examples/bench.art` prints both numbers on your machine.
 
 ## Performance expectations
 
@@ -378,15 +376,17 @@ exponential in pathological grammars (see above) and effectively
 linear in real ones.
 
 Cost is linear in the length of the input and roughly constant per
-character — `examples/bench.art` ends by scanning inputs that double
+character. `examples/bench.art` ends by scanning inputs that double
 and printing the cost per kilobyte, which should stay flat. If you are
-tuning a grammar, the things that actually move the needle are, in
-order: give an alternation its cheapest discriminating terminal first,
-so dead arms die on their first character; prefer a charset to an
-alternation of literals, since a charset is one table lookup;
-and reach for `scan.memo` only for a rule that is genuinely re-tried
-at the same position, because the table costs more than it saves
-otherwise.
+tuning a grammar, the things worth changing are, in order:
+
+- Give an alternation its cheapest discriminating terminal first, so
+  dead arms die on their first character.
+- Prefer a charset to an alternation of literals, since a charset is
+  one table lookup.
+- Reach for `scan.memo` only for a rule that is genuinely re-tried at
+  the same position, because the table costs more than it saves
+  otherwise.
 
 Two of those are not hypothetical: replacing a stack of negative
 lookaheads with one complement charset made `stripComments` an order of
@@ -417,7 +417,7 @@ other contents corrupt the token stream (see `bugs/`).
 
 ```red
 stripComments src         ; source string -> source string, comments gone
-do loadSafe "file.art"    ; read, strip, lex — the lexer never sees a comment
+do loadSafe "file.art"    ; read, strip, lex (no comment reaches the lexer)
 ```
 
 The stripper is itself a nine-rule Carpintero grammar: it respects
@@ -433,8 +433,8 @@ that hangs `arturo` directly.
 `demo.art` and `tests.art` are grammars written against inputs chosen to
 exercise them, which is the weaker half of a testing story. The other
 half is `examples/arturo-corpus.art`: the dialect turned loose on a
-checkout of Arturo itself — 173 `.art` files, 1,074,474 bytes of source
-nobody wrote with this package in mind.
+checkout of Arturo itself, 173 `.art` files and 1,074,474 bytes of
+source nobody wrote with this package in mind.
 
 ```
 git clone --depth 1 https://github.com/arturo-lang/arturo
@@ -448,7 +448,7 @@ It asks two questions.
 The property that matters for a source rewriter is that rewriting never
 changes the program. That is a differential test: lex each file twice,
 once raw and once stripped, and compare the blocks. Arturo's own test
-suite is a hostile corpus for this by construction — apostrophes inside
+suite is a hostile corpus for this by construction: apostrophes inside
 comments, commented-out code, nested curly strings, char literals,
 deliberate syntax errors.
 
@@ -479,14 +479,14 @@ So: zero cases where stripping a comment changed the program.
 
 The second half of the run is the tree walk from
 [above](#walking-a-whole-tree), pointed at every file: find every
-function definition, in all the spellings the language allows —
+function definition, in all the spellings the language allows:
 `function`, `method`, and the `$` sigil, block-bodied or `->`-bodied.
 `$` lexes as a bare symbol, so `quote $` is what distinguishes a
 definition from the arithmetic that lexes identically (`g: + [1 2]`).
 
 It found **287 definitions, 235 block-bodied and 52 after an arrow**.
 Cross-checked file by file against an independent regex, the two agree
-everywhere except three files — and in all three the grammar is right:
+everywhere except three files, and in all three the grammar is right:
 twice because it does not see commented-out definitions (the regex
 does), once because the regex miscounted.
 
@@ -497,8 +497,8 @@ in one number.
 
 ### What it costs
 
-About **26 seconds** for the megabyte, of which `stripComments` is 9.5 —
-the rest is the tree walk. Lexing every file twice, which the run also
+About **26 seconds** for the megabyte, of which `stripComments` is 9.5.
+The rest is the tree walk. Lexing every file twice, which the run also
 does, is free at this resolution: it is the interpreter's own lexer, in
 native code.
 
@@ -513,17 +513,18 @@ old rule for a run of ordinary characters was
 srcPlain: [some [not {"} not "{" not "'" not ";" skip]]
 ```
 
-— four negative lookaheads and a `skip`, five rule invocations for every
-ordinary character, and ordinary characters are almost all of any source
-file. It is now `[some srcOrdinary]`, where `srcOrdinary` is the
+That is four negative lookaheads and a `skip`, five rule invocations for
+every ordinary character, and ordinary characters are almost all of any
+source file. It is now `[some srcOrdinary]`, where `srcOrdinary` is the
 complement charset of those four characters, which the matcher settles
 with one lookup in the charset's ASCII table. Same language accepted,
 byte-identical output over the whole corpus, an order of magnitude less
 work.
 
 The tree walk was two passes, one for all definitions and one for the
-block-bodied ones. Collapsing them into a single pass — `defer` counting
-each kind as it commits — is worth less than it looks if you write it as
+block-bodied ones. Collapsing them into a single pass, with `defer`
+counting each kind as it commits, is worth less than it looks if you
+write it as
 
 ```red
 walk: [any [keep [defn ahead :block] defer [...]
@@ -531,17 +532,17 @@ walk: [any [keep [defn ahead :block] defer [...]
 ```
 
 because every element that is *not* a definition, which is almost all of
-them, tries `defn` twice. Factoring the shared prefix out so `defn` is
-attempted once, with the classification hanging off the end of the same
-arm, is what actually pays:
+them, tries `defn` twice. What pays is factoring the shared prefix out
+so `defn` is attempted once, with the classification hanging off the
+end of the same arm:
 
 ```red
 walk: [any [keep defn [ahead :block defer [...] | defer [...]]
           | into walk | skip]]
 ```
 
-Both fixes are the same idea in different clothing: **make the common
-path cheap, and never test the same thing twice at one position.** See
+Both fixes are the same idea: **make the common path cheap, and never
+test the same thing twice at one position.** See
 [Performance expectations](#performance-expectations).
 
 ## Differences from Rebol/Red PARSE
@@ -572,17 +573,17 @@ arturo tests.art trace
 `tests.art` exits nonzero if anything fails and prints every failure with
 what it got and what it wanted. The `trace` argument prints each section
 and each check as it runs, which is how you find a case that *aborts* the
-run rather than merely failing it — a distinction that matters here, since
+run rather than merely failing it, a distinction that matters here, since
 a script that upsets the 0.10.0 interpreter tends to exit silently.
 
 Run it from the repository root: the panic cases shell out.
 
 That last part needs explaining, because it looks like over-engineering
-and is not. Grammar errors — an unbound rule word, left recursion, `keep`
-outside `collect` — panic by design, and a panic unwound through `try`
+and is not. Grammar errors (an unbound rule word, left recursion, `keep`
+outside `collect`) panic by design, and a panic unwound through `try`
 leaves the abandoned matcher frames' values on the stack, where the next
-statements read them as arguments. The symptom is not a failed assertion;
-it is a run that dies several lines later with no message at all. So each
+statements read them as arguments. The symptom is a run that dies several
+lines later with no message at all, not a failed assertion. So each
 of the eighteen panic cases runs in its own interpreter through
 `tests-panics.art`, and counts as passed when that run started and did not
 reach the end. You can run one on its own to see the message:

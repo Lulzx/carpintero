@@ -41,7 +41,7 @@ Actual output:
 leak | got: true | expected: 7
 ```
 
-`expected` receives the leaked `7`; the real argument `42` is lost. If the
+`expected` receives the leaked `7`, and the real argument `42` is lost. If the
 result of `earlyReturn true` is assigned to a variable instead of
 discarded, the output is correct (`expected: 42`).
 
@@ -58,7 +58,7 @@ discarded, the output is correct (`expected: 42`).
 
 Found while developing a pure-Arturo parsing package, where it manifested
 as comparison checks failing on values that printed as equal. Workaround:
-route every unused call result through the `discard` builtin — including
+route every unused call result through the `discard` builtin, including
 `discard loop items 'x [...]` for the empty-loop face, which it also
 fixes. (Dummy-variable assignment works too, but `discard` is the
 intended tool and reads as intent.)

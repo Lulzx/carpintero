@@ -60,9 +60,9 @@ argue with:
   comparison rules. Carpintero picks one rule everywhere. A case-insensitive
   attribute can come later, documented as applying to string literals only.
 - **`capture` takes the span the rule consumed.** For string input that is a
-  substring; for block input, the matched values. Capturing into the same
-  name twice keeps the last match; accumulating is what `collect`/`keep` is
-  for. UPARSE ended up splitting Rebol's `copy` in two because "what input
+  substring, and for block input the matched values. Capturing into the same
+  name twice keeps the last match, and accumulating is what `collect`/`keep`
+  is for. UPARSE ended up splitting Rebol's `copy` in two because "what input
   did this rule cross" and "what value did it produce" are different
   questions. `capture` answers the first, and a `do` escape can compute the
   second from it.
@@ -91,8 +91,8 @@ carved out of the language. It is the language's stated principle:
 
 A grammar dialect is the hardest exercise of that principle the language could
 get. Grafito's graph-command vocabulary shows the idea works for a flat
-command language; the HTML and SQL DSLs on the wishlist would be more of the
-same. A grammar dialect shows it survives recursion, backtracking, and a
+command language, and the HTML and SQL DSLs on the wishlist would be more of
+the same. A grammar dialect shows it survives recursion, backtracking, and a
 vocabulary of thirty-odd words, which is the case Rebol used to prove
 dialecting was more than a slogan.
 
@@ -101,7 +101,7 @@ block it means ordered alternation instead. Since rule blocks are never
 evaluated as Arturo code, the two meanings never meet, but a reader who knows
 the pipe should be told once, in the docs, that this is deliberate.
 
-## The part that matters most: parsing blocks
+## Parsing blocks
 
 Rebol's PARSE works on block input as well as string input. That is the
 feature its users cite first, and the reason this proposal is worth more than
@@ -130,7 +130,7 @@ type values doing double duty as pattern terminals (`greet:` in a block is a
 matches the next value literally even when it is a dialect keyword, so a
 grammar can match code that itself contains the word `some` or an integer
 that would otherwise read as a repeat count. Rebol added `quote` for exactly
-this reason, late, after users hit the wall; it should be in from the start.
+this reason, late, after users hit the wall. It should be in from the start.
 
 A dialect that can pattern-match Arturo source is the substrate for the
 completion package already on the wishlist, for linting, for refactoring
@@ -155,7 +155,7 @@ transfers.
 
 Recursion is a rule referring to itself by name, with no special form.
 
-`capture` binds one name to one span; `collect` gathers everything `keep`
+`capture` binds one name to one span. `collect` gathers everything `keep`
 kept beneath it:
 
 ```red
@@ -167,11 +167,11 @@ scan "one, two, three" [
 ; => [words: ["one" "two" "three"]]
 ```
 
-Two rules of the road, both learned from Rebol's scars:
+Two rules, both learned from Rebol's history:
 
 - **Loops must make progress.** `any` and `some` terminate when an iteration
   matches without consuming input. Red's `while` deliberately lacks this guard
-  and its own documentation shows `[while none]` hanging the interpreter;
+  and its own documentation shows `[while none]` hanging the interpreter.
   Rebol 2's `any []` could lock the session. Ren-C went further and deleted
   the 0+ loop entirely, rebuilding it as `opt some`. Keeping `any` with a
   mandatory progress guard preserves the familiar word without the trap.
@@ -182,7 +182,7 @@ Charset syntax: inside `charset "..."`, a `-` between two characters denotes
 an inclusive range, and a leading, trailing, or escaped `\-` is the literal
 dash. `charset "a-z0-9-"` is lowercase letters, digits, and dash. Charsets
 are values, so union, intersection, and complement compose them the way
-bitsets compose in Rebol — as `csUnion`, `csIntersect`, and
+bitsets compose in Rebol, as `csUnion`, `csIntersect`, and
 `csComplement`, since core owns the unprefixed words for blocks.
 
 ### Arriving from Red
@@ -193,8 +193,8 @@ table:
 | Rebol/Red | Carpintero | Difference |
 | --- | --- | --- |
 | `parse` | `scan` | core owns `parse` |
-| `set x` / `copy x` | `capture 'x` | one form; span-of-input; rolls back |
-| `collect` / `keep` | `collect 'x` / `keep` | kept values roll back; named target |
+| `set x` / `copy x` | `capture 'x` | one form, span-of-input, rolls back |
+| `collect` / `keep` | `collect 'x` / `keep` | kept values roll back, named target |
 | `and` / `ahead`, `not` | `ahead`, `not` | same |
 | `(paren)` | `do [...]` | same re-run caveat, stated up front |
 | `into` | `into` | same |
@@ -205,7 +205,7 @@ table:
 | `if (expr)` | absent | `do` plus Phase 2 lookahead covers it |
 | datatype terminals (`integer!`) | `:integer` | the language's own type literals |
 
-The absences are deliberate scope, not omissions to be fixed later; the case
+The absences are deliberate scope, not omissions to be fixed later. The case
 for each is elsewhere in this document.
 
 ## Backtracking semantics
@@ -221,11 +221,11 @@ Rebol and Red made the opposite choice. Red's spec is explicit: "only input
 and rule positions are backtracked, other changes remain," so a `set` or
 `copy` in a failed alternative leaves the variable holding a value from a
 parse path that officially never happened, and `keep`s from dead branches
-survive into the collected block. It is the single most-cited semantic wart
+survive into the collected block. It is the most-cited semantic wart
 in PARSE, and every modern engine in this space (LPeg, Janet's `peg`, and
 Ren-C's UPARSE redesign of PARSE itself) rolls captures back. UPARSE does it
 by routing all accruals through one "pending" list that the failure path
-drops; LPeg does it by recording captures as a flat log and truncating the
+drops. LPeg does it by recording captures as a flat log and truncating the
 log to a saved height on backtrack, which costs one integer store. Carpintero
 adopts the LPeg model outright: captures are marks in a log during matching,
 values materialize only after overall success, rollback is truncation. That
@@ -242,7 +242,7 @@ abandoned, and may therefore run more than once for a single `scan`. Escapes
 should compute, not mutate. Anything that must happen exactly once belongs
 after the parse, driven by the captures. Rebol's docs promise only that a
 paren "executes if parsing reaches that point," which quietly includes
-reaching it twice; Red at least documents the limited backtracking. Here it
+reaching it twice, and Red at least documents the limited backtracking. Here it
 is a rule, stated where the feature is introduced. If a real need for
 run-exactly-once escapes emerges, UPARSE points at the sound design: a
 deferred escape whose block is queued during matching and evaluated only on
@@ -332,7 +332,7 @@ alternation, truncating on failure. Ordinary PEG mechanics, a few hundred
 lines. This is deliberately the slow version. UPARSE itself ships as three
 thousand lines of interpreted usermode code and is openly "glacially slow,"
 because its authors judged that getting the semantics right in a malleable
-medium comes first; the same judgment applies here.
+medium comes first, and the same judgment applies here.
 
 Doing it this way means the design can be evaluated, argued with, and revised
 before a single line of Nim is written, and it installs with
@@ -342,8 +342,8 @@ rather than a subsystem.
 
 This is no longer hypothetical: a draft ships alongside this proposal.
 `carpintero.art` (about 800 lines) implements the Phase 0 through Phase 2
-scope against Arturo 0.10.0, plus the interpreted half of Phase 3 —
-`cut`, `defer`, opt-in memoization — and `demo.art` passes seventy-one checks
+scope against Arturo 0.10.0, plus the interpreted half of Phase 3
+(`cut`, `defer`, opt-in memoization), and `demo.art` passes seventy-one checks
 covering the date example above, capture rollback across failed
 alternatives, the progress guard on nullable loop bodies, prefix mode,
 `to`/`thru`, charset ranges, a mutually recursive JSON validator in nine
@@ -355,8 +355,8 @@ them), charset composition, lookahead, `collect`/`keep` with rollback, the
 `do` escape (the demo *demonstrates* the re-run contract: an escape inside
 `some` runs once per attempt, including the failed one), and the
 farthest-failure error report: the `date` grammar failing on
-`"2026-08-0x"` renders the Phase 2 target message shown below verbatim —
-the failing terminal named by its rule (`digit`, not its charset
+`"2026-08-0x"` renders the Phase 2 target message shown below verbatim,
+with the failing terminal named by its rule (`digit`, not its charset
 internals), the enclosing capture as while-matching context, and the
 source line with a caret under the column. Failures inside the operand of
 `not` are excluded from the expected set, since there a failure is the
@@ -368,11 +368,11 @@ interpreter bugs worth filing upstream, which is what dogfooding is for
 (minimal repros in `bugs/`): the 0.10.0 lexer does not fully ignore comment
 contents (a `\-` inside a comment hangs it), a function call whose result
 is discarded can leak that value into the argument stream of an enclosing
-call, and `do` of a block whose last expression produces no value — an
-assignment, a `set`, a zero-arity call — corrupts the enclosing frame,
+call, and `do` of a block whose last expression produces no value (an
+assignment, a `set`, a zero-arity call) corrupts the enclosing frame,
 usually as a silent exit. The third was first misdiagnosed as "escape
 blocks cannot assign," which accidentally enforced this proposal's own
-"escapes should compute, not mutate" rule; the real trigger is the
+"escapes should compute, not mutate" rule. The real trigger is the
 value-less tail, and the draft now sidesteps it by evaluating every
 escape block padded with a trailing value (`op ++ [true]`), so escapes
 may in fact assign freely. The unused-result leak is likewise avoided
@@ -383,7 +383,7 @@ lexing anything, so `loadSafe` strips comments at the string level
 with a nine-rule Carpintero grammar and only then hands the source to
 the lexer, which never sees a comment byte. The file in `bugs/` that
 hangs the interpreter runs correctly through it
-(`examples/safeload.art`) — the dialect fixing the language's own
+(`examples/safeload.art`), the dialect fixing the language's own
 front end, which is demo 3's thesis stated as a working program.
 
 **Then propose the matcher core in Nim,** once the vocabulary and the
@@ -399,14 +399,14 @@ grammars a compiler can lower to DFA-like code with no backtracking at all,
 which generalizes the charset-run and head-fail tricks LPeg applies ad hoc.
 
 **Error reporting is where this can beat Rebol.** Classic PARSE returns true
-or false and nothing else; Red and Ren-C both had to retrofit tracing hooks
+or false and nothing else, and Red and Ren-C both had to retrofit tracing hooks
 to find out where a grammar died. The standard fix, from Ford's thesis
 onward, is the farthest-failure heuristic: track the furthest input position
 reached across all backtracking, plus the set of terminals that failed there.
 That high-water mark is almost always where the real failure is, even though
 the matcher has since backtracked far away from it, and maintaining it costs
 two fields updated on terminal failure. For string input, report it with line
-and column and the expected terminals; letting a rule carry an optional
+and column and the expected terminals. Letting a rule carry an optional
 description string (Ohm's trick) turns "expected charset 0-9" into "expected
 a date." Concretely, the Phase 2 target for the `date` grammar above:
 
@@ -420,15 +420,15 @@ scan "2026-08-0x" date
 ```
 
 For block input, report a path of indices into the nested structure
-instead; the draft does this by making the failure position itself
-path-qualified — the `into` descent indices plus the index, ordered
-lexicographically with deeper winning ties — which degenerates to the
+instead. The draft does this by making the failure position itself
+path-qualified, the `into` descent indices plus the index, ordered
+lexicographically with deeper winning ties, which degenerates to the
 plain high-water mark on flat input. A `fail "message"` rule for positions where failure means error
 rather than alternative (after a committed keyword, say) is the labeled-
 failure refinement from the PEG literature, and slots in as a Phase 2 word.
 The same research line has since shown that labels and recovery expressions
 can be *inserted automatically* by analyzing the grammar (Medeiros and
-Mascarenhas, 2025); because Carpintero's rules are data, that analysis is an
+Mascarenhas, 2025). Because Carpintero's rules are data, that analysis is an
 ordinary Arturo function over blocks, and makes a natural later tool rather
 than a core feature.
 
@@ -452,10 +452,10 @@ interesting global properties of a PEG (whether a choice arm is dead, whether
 two grammars are equivalent) are undecidable, so any further lint the package
 grows must be openly conservative, a warning pass and not a verifier.
 
-Actually *supporting* left recursion is explicitly out of scope, and not just
+*Supporting* left recursion is explicitly out of scope, and not just
 for Phase 0. The seed-growing algorithm requires packrat memoization to exist
 and produces wrong parses for some grammars that mix left and right recursion
-(Tratt's critique); nearly every practical engine (LPeg, Janet, NPeg, pest,
+(Tratt's critique). Nearly every practical engine (LPeg, Janet, NPeg, pest,
 Ohm) rejects it instead, and the systems that do support it (Python's Pegen,
 Autumn, Pika and its successor Squirrel) all pay for it with full memoization
 or fixed-point re-parsing. The one real use case, left-associative operator
@@ -464,17 +464,17 @@ can arrive in a later phase if grammars demand it.
 
 **No packrat memoization.** For the flat data these grammars mostly chew,
 full memoization multiplies memory by the input size and usually slows
-matching down; that finding is the founding argument of LPeg's VM, and
+matching down. That finding is the founding argument of LPeg's VM, and
 CPython's PEG parser settled on memoizing only individually marked rules.
 Carpintero routes every rule invocation through one dispatch point keyed by
 rule and position, and the draft now carries the opt-in version:
 `scan.memo: ['rule ...]` memoizes exactly the named rules for that scan.
-The benchmark shows why both halves of that sentence matter — the
+The benchmark shows why both halves of that sentence matter: the
 deliberately exponential tower grammar drops from about a second and a
 half to about five milliseconds when memoized, and ordinary grammars pay
 nothing because nothing is memoized unless asked. A memo entry stores the
 capture-log slice its rule produced, not just the end position, or memoized
-hits would silently drop captures (Kuramitsu documents the fix); the two
+hits would silently drop captures (Kuramitsu documents the fix). The two
 honest losses on a hit, documented in the code, are that a `do` escape
 inside the rule does not re-run and the farthest-failure report is not
 re-recorded. If entries are
@@ -491,11 +491,11 @@ stops the whole choice instead of trying the next alternative.
 of code to test by hand: the interesting inputs are the ones nobody thinks
 of. Two techniques from the literature apply directly. Differential testing:
 run the same grammar through the interpreted matcher and, later, the compiled
-core, on generated inputs, and require identical results; the interpreted
-version stays alive permanently as the executable specification. Generation:
+core, on generated inputs, and require identical results, with the interpreted
+version staying alive permanently as the executable specification. Generation:
 deriving test sentences *from* the grammar has to respect PEG semantics,
 because naively generating from the CFG reading of a grammar produces strings
-the PEG rejects (ordered choice excludes them); Garnock-Jones, Eslamimehr and
+the PEG rejects (ordered choice excludes them). Garnock-Jones, Eslamimehr and
 Warth show how to generate correctly from PEG derivatives, and a
 rules-as-data grammar makes that generator another ordinary function over
 blocks.
@@ -517,11 +517,11 @@ dialect must agree with the language about what position N means.
 - **Phase 3**: the Nim rule compiler, `cut`, opt-in per-rule memoization,
   deferred (commit-time) escapes if demand exists, benchmarks against `match`
   and against hand-written parsers. Everything but the compiler now exists
-  in the interpreted draft — `cut`, `defer`, `scan.memo`, and
-  `examples/bench.art` — so what remains of Phase 3 is exactly the upstream
+  in the interpreted draft (`cut`, `defer`, `scan.memo`, and
+  `examples/bench.art`), so what remains of Phase 3 is exactly the upstream
   conversation: an engine swap under settled semantics.
 
-## Demos, in order of how well they land
+## Demos, in order of how convincing they are
 
 All three now exist as runnable scripts in `examples/`, against the draft
 implementation.
@@ -532,7 +532,7 @@ implementation.
 2. **A format the core currently hand-parses in Nim.** `helpers/` contains
    hand-written `csv.nim`, `toml.nim`, `xml.nim`, `url.nim`, and `markdown.nim`.
    Showing CSV or TOML as a dozen lines of Arturo rules is a demo of
-   expressiveness today, and a structural argument only later: actually
+   expressiveness today, and a structural argument only later:
    replacing those parsers depends on the Phase 3 compiled core being fast
    enough, and even then some may stay in Nim. The direction is still worth
    pointing at as Phase 3 work: Nim code becoming Arturo code, a smaller core,
@@ -559,14 +559,14 @@ implementation.
   came from the grammar engine. Two interpreter properties accounted for it:
   indexing an Arturo string by position walks the UTF-8 from the front, so a
   matcher that indexes constantly is quadratic in the length of its input
-  unless it converts to a block of characters first; and a scoped Arturo call
+  unless it converts to a block of characters first. And a scoped Arturo call
   that assigns any local costs roughly twenty times one that assigns none, so
   the cost of the tree walk was mostly the cost of building frames for it,
   recoverable through `function.inline` wherever no two live instances of the
   same function can share a scope. Both are worth knowing independently of
   this package. What they mean for staging is that the remaining gap to
   `match` is about three and a half orders of magnitude rather than four and
-  a half, and that it is now genuinely the interpreter, not the design — which
+  a half, and that it is now genuinely the interpreter, not the design, which
   is the argument for the compiled core, made honestly.
 - **PEG is not CFG**, with the specific costs listed above: hidden prefixes,
   greedy repetition, silent disambiguation.

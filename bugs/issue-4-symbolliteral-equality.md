@@ -6,22 +6,22 @@
 
 ## Describe the bug
 
-A value of type `:symbolliteral` — the quoted-operator form, `'+`, `'-`,
-`'-->` — compares unequal to itself. Both `=` and `equal?` return `false`
+A value of type `:symbolliteral`, the quoted-operator form (`'+`, `'-`,
+`'-->`), compares unequal to itself. Both `=` and `equal?` return `false`
 for the very same value, so the type is outside reflexive equality
 entirely.
 
 Everything downstream of equality inherits it: `contains?` cannot find a
 symbolliteral in a block that holds it, `unique` will not deduplicate one,
 and any block or dictionary containing one is never equal to a copy of
-itself. That last consequence is how this was found — a source-rewriting
+itself. That last consequence is how this was found: a source-rewriting
 tool checked its own output by lexing both forms and comparing the blocks,
 and two files out of Arturo's test suite reported a difference that did
 not exist.
 
 The neighbouring types behave correctly: `:symbol` (`<=`), `:literal`
 (`'foo`) and `:word` (`foo`) are all reflexively equal. Only the
-symbolliteral is affected, and every spelling of it is —
+symbolliteral is affected, and every spelling of it is:
 `'+ '- '* '^ '~ '=> '-->` all fail.
 
 ## To reproduce
@@ -29,14 +29,14 @@ symbolliteral is affected, and every spelling of it is —
 ```arturo
 s: first to :block {'+}
 
-print s = s              ; false — expected true
-print equal? s s         ; false — expected true
-print contains? @[s] s   ; false — expected true
-print unique @[s s]      ; [+ +] — expected [+]
+print s = s              ; false, expected true
+print equal? s s         ; false, expected true
+print contains? @[s] s   ; false, expected true
+print unique @[s s]      ; [+ +], expected [+]
 
 a: to :block {byteCode ['+]}
 b: to :block {byteCode ['+]}
-print a = b              ; false — expected true
+print a = b              ; false, expected true
 ```
 
 A self-contained repro, including the control cases for the neighbouring
@@ -60,7 +60,7 @@ against itself.
 ## Notes
 
 `to :string` renders the value correctly, so the value itself is intact
-and it is the comparison that is missing — most likely a missing
+and it is the comparison that is missing, most likely a missing
 `SymbolLiteral` branch in the value-equality dispatch, falling through to
 a default that reports inequality rather than raising.
 

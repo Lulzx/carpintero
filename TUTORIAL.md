@@ -3,7 +3,7 @@
 This is the guided path: one grammar at a time, each building on the
 last, ending with Arturo reading its own source. It assumes you know
 Arturo and nothing about PARSE. [MANUAL.md](MANUAL.md) is the reference
-to reach for once the shape is familiar; [proposal.md](proposal.md)
+to reach for once the shape is familiar. [proposal.md](proposal.md)
 argues why the dialect looks like this.
 
 Every snippet below runs as written. Start a file with the import and
@@ -24,20 +24,20 @@ scan? "2026-08-03" ["2026-08-03"]     ; true
 
 That block is a **sequence**: match a string literal, then stop. `scan?`
 answers yes or no. Its sibling `scan` returns a dictionary of whatever
-the grammar captured — an empty one here, because nothing was captured
-yet — or `null` if the match failed.
+the grammar captured (an empty one here, because nothing was captured
+yet), or `null` if the match failed.
 
 One rule to internalise now, because it explains most early surprises:
 **the whole input must match.** A grammar that matches a prefix and
 stops has failed.
 
 ```red
-scan? "2026-08-03" ["2026"]           ; false — four characters left over
+scan? "2026-08-03" ["2026"]           ; false, four characters left over
 scan.prefix "2026-08-03" ["2026"]     ; [reached:4 captures:[]]
 ```
 
 `scan.prefix` is the escape hatch when a prefix is genuinely what you
-want; `reached` tells you how far it got.
+want. `reached` tells you how far it got.
 
 ## 2. Character sets and repetition
 
@@ -47,15 +47,15 @@ A charset is a value you build once, outside the grammar, and name:
 digit: charset "0-9"
 
 scan? "7"     [digit]           ; true
-scan? "2026"  [4 digit]         ; true — exactly four
-scan? "2026"  [some digit]      ; true — one or more
-scan? ""      [any digit]       ; true — zero or more
+scan? "2026"  [4 digit]         ; true, exactly four
+scan? "2026"  [some digit]      ; true, one or more
+scan? ""      [any digit]       ; true, zero or more
 scan? "12-99" [some digit "-" some digit]
 ```
 
 !!! warning "Charsets are built outside the rule, always"
     Rule blocks are **never evaluated as code**. Writing
-    `[some charset "a-z"]` does not call `charset` — the block just
+    `[some charset "a-z"]` does not call `charset`. The block just
     holds the bare word `charset`, which resolves to the builtin
     function, which is not a grammar rule. Carpintero catches this
     before matching starts and tells you so by name, but the fix is
@@ -64,7 +64,7 @@ scan? "12-99" [some digit "-" some digit]
 
 The quantifiers are `some` (1+), `any` (0+), `opt` (0 or 1), a bare
 integer for exactly N, and `between N M`. All of them are **greedy and
-never give back** — more on what that costs in §7.
+never give back**. §7 covers what that costs.
 
 ## 3. Captures
 
@@ -86,7 +86,7 @@ r: scan "2026-08-03" date
 ```
 
 A capture is always the *input it consumed*, never a computed value. If
-you want an integer, convert it afterwards — the grammar's job is to
+you want an integer, convert it afterwards. The grammar's job is to
 find the span, not to interpret it.
 
 To gather a repeating thing, pair `collect` with `keep`:
@@ -99,10 +99,9 @@ scan "a,bb,ccc" [collect 'fields [keep word any ["," keep word]]]
 ; => [fields:[a bb ccc]]
 ```
 
-The single most important property here, and the one that separates
-this from Rebol and Red: **captures roll back**. A capture made inside
-an alternative that later fails is discarded along with it. A dead parse
-path leaves nothing behind.
+The property that separates this from Rebol and Red: **captures roll
+back**. A capture made inside an alternative that later fails is
+discarded along with it. A dead parse path leaves nothing behind.
 
 ## 4. Ordered choice, and the trap in it
 
@@ -115,7 +114,7 @@ scan? "ab" ["ab" | "a"]       ; true
 ```
 
 The first line reads like it should work. It does not: `"a"` matches,
-the choice commits, and then the leftover `b` fails the whole scan —
+the choice commits, and then the leftover `b` fails the whole scan,
 without ever going back to try `"ab"`. This is ordered choice, and it is
 the deal PEG makes. In exchange you get no ambiguity and no surprise
 exponential blowup from a grammar that quietly matched two ways.
@@ -123,7 +122,7 @@ exponential blowup from a grammar that quietly matched two ways.
 The rule of thumb: **order alternatives longest-first**, or make the
 boundary explicit with lookahead (`["ab" | "a" not "b"]`).
 
-Note also that `|` binds loosely — `[a b | c]` is `[[a b] | c]`. Write
+Note also that `|` binds loosely: `[a b | c]` is `[[a b] | c]`. Write
 the grouping brackets you mean.
 
 ## 5. Rules that name each other, and recurse
@@ -148,7 +147,7 @@ expr: [expr "+" digit | digit]
 ; carpintero: left recursion detected: expr -> expr
 ```
 
-Write the iteration instead — `[digit any ["+" digit]]` — which is what
+Write the iteration instead, `[digit any ["+" digit]]`, which is what
 you meant anyway.
 
 ## 6. When it fails, ask why
@@ -165,9 +164,9 @@ print scanError
 ;              ^
 ```
 
-`expected:` names the terminal by its **rule name** when it has one, so
-naming your charsets pays for itself twice. `while matching:` is the
-innermost enclosing rule or capture — here the capture `'d`.
+`expected:` names the terminal by its **rule name** when it has one,
+which is a second reason to name your charsets. `while matching:` is
+the innermost enclosing rule or capture, here the capture `'d`.
 
 ## 7. Greedy means greedy
 
@@ -177,9 +176,9 @@ scan? "aa" [any ["a" ahead "a"] "a"]    ; true
 ```
 
 `any "a"` eats both characters and will not give one back for the `"a"`
-that follows, so the first line can never match — for *any* input.
+that follows, so the first line never matches, for *any* input.
 `ahead` fixes it by making the loop check that another `"a"` follows
-before consuming the current one; it matches without consuming. Its
+before consuming the current one, and it matches without consuming. Its
 partner `not` succeeds when its operand does *not* match.
 
 If a grammar of yours fails on input you are certain is correct, a
@@ -188,8 +187,8 @@ greedy loop that swallowed the thing after it is the first suspect.
 ## 8. Blocks as input
 
 Everything so far worked on strings. The same grammars work on
-**blocks** — and since `to :block` turns Arturo source into a block,
-this is where the dialect earns its keep.
+**blocks**, and since `to :block` turns Arturo source into a block, a
+grammar can match Arturo code itself.
 
 On block input the terminals become the language's own type literals,
 and `'word` matches an exact word:
@@ -238,9 +237,9 @@ Two things worth noticing:
 
 ## 10. The real thing
 
-`examples/arturo-corpus.art` is §9 pointed at Arturo's own source tree —
+`examples/arturo-corpus.art` is §9 pointed at Arturo's own source tree:
 every `.art` file in a checkout, comments stripped by a second Carpintero
-grammar first. It is worth reading and worth running:
+grammar first. Read it, then run it:
 
 ```
 git clone --depth 1 https://github.com/arturo-lang/arturo
@@ -253,9 +252,9 @@ the interpreter bug it turned up.
 
 ## Where to go next
 
-- [MANUAL.md](MANUAL.md) — the complete reference: every word, the error
+- [MANUAL.md](MANUAL.md), the complete reference: every word, the error
   report, memoization, `cut`, `defer`, the PEG pitfalls in full.
-- `demo.art` — the same ground as this tutorial in executable form, 71
+- `demo.art`, the same ground as this tutorial in executable form, 71
   checks, printing as it goes.
-- `examples/` — [JSON in fifteen rules, RFC 4180 CSV in a dozen, the
+- `examples/`: [JSON in fifteen rules, RFC 4180 CSV in a dozen, the
   self-scan, and the benchmarks](examples/README.md).

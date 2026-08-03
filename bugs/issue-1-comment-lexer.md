@@ -1,6 +1,6 @@
 # [Draft issue for arturo-lang/arturo]
 
-**Title:** Lexer does not fully ignore comment contents — `\-` in a comment hangs the parser
+**Title:** Lexer does not fully ignore comment contents: `\-` in a comment hangs the parser
 
 **Body:**
 
@@ -13,7 +13,7 @@ case: a `\-` sequence inside a line comment makes the parser hang forever
 Related, harder-to-minimize symptoms we hit with other comment contents
 (quotes, apostrophes, brackets): phantom `Syntax Error: missing closing
 parenthesis` reported at EOF, and silent `exit 1` with no output at all.
-These appear to be **contextual** — a comment line that parses fine in
+These appear to be **contextual**: a comment line that parses fine in
 isolation can break a file when adjacent to other lines, which is why only
 the hang is minimized below.
 
@@ -24,12 +24,12 @@ the hang is minimized below.
 print "should print but never does"
 ```
 
-`arturo repro.art` → hangs.
+Running `arturo repro.art` hangs.
 
 ## Expected behavior
 
-Comments should be byte-transparent to the lexer; the script should print
-and exit.
+Comments should be byte-transparent to the lexer, and the script should
+print and exit.
 
 ## Environment
 
@@ -44,6 +44,6 @@ dashes.
 A general in-language workaround also exists, since `read` returns raw
 source without lexing: strip comments at the string level (respecting
 string and char literals), then lex with `to :block` and evaluate with
-`do` — the lexer never sees a comment byte. The package now ships this
-as `loadSafe`; the repro file above, which hangs `arturo` directly, runs
+`do`, so no comment byte reaches the lexer. The package now ships this
+as `loadSafe`. The repro file above, which hangs `arturo` directly, runs
 correctly through it.

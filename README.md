@@ -4,7 +4,7 @@
 
 A PARSE-class grammar dialect for [Arturo](https://arturo-lang.io): rules are
 ordinary Arturo blocks that compose, nest, and recurse, and they match
-strings *and* blocks — so Arturo can pattern-match its own source.
+strings *and* blocks, so Arturo can pattern-match its own source.
 
 ```red
 digit: charset "0-9"
@@ -34,8 +34,8 @@ print scanError
 A terminal that has a rule name is reported by that name, the innermost
 enclosing rule or capture becomes the while-matching context, and the
 offending line is shown with a caret under the column. For block input
-the report gives an index — or, when the failure is inside `into`, a
-path of indices into the nested structure.
+the report gives an index, or a path of indices into the nested
+structure when the failure is inside `into`.
 
 Block input uses the language's own type values as terminals:
 
@@ -69,34 +69,34 @@ Charsets are values and compose: `csUnion`, `csIntersect`,
 
 Two utilities ride along: `stripComments` removes comments from a
 source string with a Carpintero grammar, and `loadSafe` reads a file,
-strips it, and returns the lexed block — which sidesteps the 0.10.0
-lexer bug where comment contents can hang or corrupt the interpreter
+strips it, and returns the lexed block, sidestepping the 0.10.0 lexer
+bug where comment contents can hang or corrupt the interpreter
 (`examples/safeload.art` runs a file that hangs `arturo` directly).
 
 [TUTORIAL.md](TUTORIAL.md) is the guided path from a first `scan` to
-walking a source tree. The full reference — every word, the error
-report, memoization, the PEG pitfalls and their fixes — is
-[MANUAL.md](MANUAL.md). Semantics worth knowing, all deliberate (the
-design rationale lives in [proposal.md](proposal.md)):
+walking a source tree. [MANUAL.md](MANUAL.md) is the full reference:
+every word, the error report, memoization, the PEG pitfalls and their
+fixes. Semantics worth knowing, all deliberate (the design rationale
+lives in [proposal.md](proposal.md)):
 
-- The whole input must match; use `scan.prefix` for prefix matching.
-- Captures and keeps **roll back** when an alternative fails — a dead parse
-  path leaves nothing behind. This diverges from Rebol/Red on purpose.
+- The whole input must match. Use `scan.prefix` for prefix matching.
+- Captures and keeps **roll back** when an alternative fails, so a dead
+  parse path leaves nothing behind. This diverges from Rebol/Red on purpose.
 - Host escapes via `do` do **not** roll back and may run more than once
-  per scan, so `do` blocks should compute rather than mutate — advice
-  that stands on semantic grounds, not interpreter ones: the matcher
+  per scan, so `do` blocks should compute rather than mutate. That advice
+  stands on semantic grounds, not interpreter ones: the matcher
   pads escape blocks with a trailing value before evaluation, so
   assignments and zero-arity calls inside them are safe.
   `defer` is the sound alternative for mutation: its block is queued in the
   capture log and runs only on overall success, exactly once, in match
-  order — dead branches take their defers with them.
+  order. Dead branches take their defers with them.
 - `scan.memo: ['rule ...]` opts named rules into memoization for that
   scan. An entry stores the end position *and* the capture-log slice,
-  replayed on a hit, so captures survive; a `do` escape inside a
+  replayed on a hit, so captures survive. A `do` escape inside a
   memoized rule runs once, not once per attempt.
 - `some`/`any` stop when an iteration matches without consuming, so
   nullable loop bodies terminate instead of hanging.
-- Left recursion — direct, indirect, or through a nullable prefix — is
+- Left recursion (direct, indirect, or through a nullable prefix) is
   rejected at scan start with a message naming the cycle.
 - Matching is case-sensitive and works on characters, not bytes.
 
@@ -104,10 +104,10 @@ design rationale lives in [proposal.md](proposal.md)):
 
 Draft implementation of the proposal's Phase 0–2 scope, pure Arturo,
 verified against Arturo 0.10.0. This includes the interpreted half of
-Phase 3 — `cut`, `defer`, opt-in memoization, benchmarks — with only
+Phase 3 (`cut`, `defer`, opt-in memoization, benchmarks), with only
 the compiled Nim core left to propose upstream.
 
-`demo.art` is the readable tour (71 checks); `tests.art` is the
+`demo.art` is the readable tour (71 checks). `tests.art` is the
 regression suite (354 checks, nonzero exit on failure). Grammar errors
 have to panic to be tested, and a panic unwound through `try` leaves
 the abandoned frames' values behind for the next statements to misread,
@@ -121,26 +121,24 @@ arturo tests.art
 
 [`examples/`](examples/README.md) holds the proposal's three demos, each
 runnable on its own: JSON in fifteen rules (`json.art`), RFC 4180 CSV in
-a dozen (`csv.art`), and Arturo scanning its own source — one rule
+a dozen (`csv.art`), and Arturo scanning its own source: one rule
 extracting every function definition from `carpintero.art` itself
 (`arturo-scan.art`). `arturo-corpus.art` takes that last one all the
 way: point it at a checkout of Arturo and it runs both grammars over
 every `.art` file in the language's own tree. On 173 files and a
 megabyte of source, stripping comments never once changed the program
 the lexer builds, and a five-line block grammar found all 287 function
-definitions at every nesting depth — [the write-up is in the
+definitions at every nesting depth. [The write-up is in the
 manual](MANUAL.md#validation-against-arturos-own-source), including the
 fourth interpreter bug it turned up. `bench.art` is the Phase 3
-benchmark: it shows
-scan losing to the native regex engine by the expected orders of
-magnitude, memoization collapsing a deliberately exponential grammar
-from a sixth of a second to a millisecond and a half, and — the figure
-worth watching over time — a cost per kilobyte that stays flat as the
-input doubles.
+benchmark: it shows scan losing to the native regex engine by the
+expected orders of magnitude, memoization collapsing a deliberately
+exponential grammar from a sixth of a second to a millisecond and a
+half, and a cost per kilobyte that stays flat as the input doubles.
 
-`bugs/` contains minimal repros for four Arturo 0.10.0 interpreter bugs
-— three found while building this, one found by running it over Arturo's
-own test suite — with workarounds documented in `carpintero.art`.
+`bugs/` contains minimal repros for four Arturo 0.10.0 interpreter
+bugs, three found while building this and one found by running it over
+Arturo's own test suite. Workarounds are documented in `carpintero.art`.
 
 ## Name
 
