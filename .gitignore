@@ -1,4 +1,7 @@
-*.output
 .DS_Store
+*.output
 docs/
+nim/nimcache/
+nim/tests/dis
+nim/tests/test_vm
 site/
