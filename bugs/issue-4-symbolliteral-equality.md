@@ -81,9 +81,21 @@ against itself.
 ## Notes
 
 `to :string` renders the value correctly, so the value itself is intact
-and it is the comparison that is missing, most likely a missing
-`SymbolLiteral` branch in the value-equality dispatch, falling through to
-a default that reports inequality rather than raising.
+and it is the comparison that is missing. In the v0.10.0 source the
+equality dispatch in `src/vm/values/comparison.nim` is a `case x.kind`
+with a `Symbol` branch (`return x.m == y.m`, line 146) but no
+`SymbolLiteral` branch, even though `SymbolLiteral` is its own value kind
+(`SymbolLiteral = 19`, `src/vm/values/types.nim` line 82). The kind falls
+through to the catch-all `else: return false` at line 211, so any two
+symbolliterals report unequal. The `<` and `>` paths fall through the
+same way, which is why `compare` answers 1: with `=` and `<` both false,
+its final leg is all that is left. The fix is a `SymbolLiteral` branch
+comparing by the named symbol, as the `Symbol` branch already does.
+
+The `TODO` comments at the bottom of `comparison.nim` list every type
+whose comparison semantics were left open for discussion (Dictionary,
+Path, Regex, Binary, ...); `SymbolLiteral` is not among them, so this
+reads as an oversight rather than a decision.
 
 The workaround for anyone comparing blocks that might hold one is to
 compare `to :string` renderings instead, which is exact for this type but
