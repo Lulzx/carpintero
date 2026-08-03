@@ -358,8 +358,9 @@ after matching, during result construction.
 
 Escape blocks may assign, call zero-arity functions, and use `set`
 freely. The matcher pads each block with a trailing value before
-evaluation, which sidesteps an interpreter bug (see
-[bugs/](bugs/README.md)).
+evaluation, so that a block ending in an assignment still leaves something
+on the value stack for `discard` to take. Without the padding the stack
+underflows and the run ends without a word (see [bugs/](bugs/README.md)).
 
 An escape block evaluates in a scope of its own, so a plain assignment
 inside one does not reach a variable outside it. To accumulate across a
@@ -463,9 +464,9 @@ with the numbers under
 
 ## Comment-safe source loading
 
-Two utilities ride along because the 0.10.0 lexer does not fully
-ignore comment contents: a `\-` in a comment hangs the file loader, and
-other contents corrupt the token stream (see `bugs/`).
+Two utilities ride along because the 0.10.0 lexer scans the contents of a
+`;;` comment: a backslash in one hangs the loader, and an unbalanced
+delimiter in one is a syntax error (see `bugs/`).
 
 ```red
 stripComments src         ; source string -> source string, comments gone

@@ -20,21 +20,21 @@
 ;;   into R, matching a nested block in its entirety with rule R
 ;;   any other word: a named rule, resolved when scan runs
 ;;
-;; Three workarounds for Arturo 0.10.0 interpreter quirks, found while
-;; writing this file, each expressed with a feature of the language:
+;; Three accommodations for Arturo 0.10.0, found while writing this file,
+;; each expressed with a feature of the language:
 ;;   1. comments avoid quote marks, brackets and backslashes, since the
-;;      lexer does not fully ignore comment contents — a backslash-dash
-;;      in a comment hangs it. This file keeps its comments plain, and
-;;      exports the general fix: loadSafe strips comments from source
-;;      at the string level, before the lexer sees a byte of them,
-;;      using a Carpintero grammar — see comment-safe source loading
-;;      at the end of this file.
-;;   2. every call whose result is unused goes through discard: a
-;;      dropped call result can otherwise leak into the argument
-;;      stream of an enclosing call
-;;   3. escape blocks are evaluated as op ++ [true]: do of a block
-;;      whose last expression produces no value corrupts the
-;;      enclosing frame, and the padding guarantees a value tail
+;;      lexer scans the contents of a double-semicolon comment — a
+;;      backslash before anything but a letter hangs it. This file keeps
+;;      its comments plain, and exports the general fix: loadSafe strips
+;;      comments from source at the string level, before the lexer sees
+;;      a byte of them, using a Carpintero grammar — see comment-safe
+;;      source loading at the end of this file.
+;;   2. every call whose result is unused goes through discard. Values
+;;      left on the value stack are read as arguments by the enclosing
+;;      call, which is by design, and discard states the intent
+;;   3. escape blocks are evaluated as op ++ [true]: a block whose last
+;;      expression assigns leaves the stack empty, and popping an empty
+;;      stack ends the run without a word
 ;;
 ;; ── on speed ─────────────────────────────────────────────────────────
 ;; This is an interpreted matcher and the proposal is honest about
@@ -646,10 +646,10 @@ matchElem: function [items idx pos][
         if k = 15 [
             op: items\[idx + 1]
             unless block? op -> panic "carpintero: do expects a block of host code"
-            ; padded with a trailing value before evaluation: binding a
-            ; value-less expression corrupts the enclosing frame, and
-            ; discard's argument slot is a binding — see bugs,
-            ; valueless-assignment.
+            ; padded with a trailing value before evaluation: an escape
+            ; block ending in an assignment leaves nothing on the value
+            ; stack, and discard then pops an empty one, which exits 1
+            ; without a word — see bugs, stack-underflow-exit.
             ; With the padding, escape blocks may assign, mutate via
             ; set, or call zero-arity functions freely.
             discard do op ++ [true]

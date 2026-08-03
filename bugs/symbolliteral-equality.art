@@ -13,6 +13,11 @@ s: first to :block {'+}
 print ["type:                " type s]
 print ["renders as:          " to :string s]
 print ""
+;; the root: comparison reports "greater" for a value against itself,
+;; while both orderings report false
+print ["compare s s = 0      " (compare s s) = 0]           ; false, it is 1
+print ["s < s or s > s       " or? s < s s > s]             ; false
+print ""
 print ["s = s                " s = s]                       ; false
 print ["equal? s s           " equal? s s]                  ; false
 print ["contains? @[s] s     " contains? @[s] s]            ; false

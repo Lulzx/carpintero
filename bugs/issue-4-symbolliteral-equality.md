@@ -11,6 +11,21 @@ A value of type `:symbolliteral`, the quoted-operator form (`'+`, `'-`,
 for the very same value, so the type is outside reflexive equality
 entirely.
 
+The underlying comparison is what to look at first. `compare` reports
+"greater" for a value against itself, while both orderings report false:
+
+```arturo
+s: first to :block {'+}
+
+print ["compare s s:" compare s s]   ; 1
+print ["s < s:" s < s]               ; false
+print ["s > s:" s > s]               ; false
+print ["s = s:" s = s]               ; false
+```
+
+A `compare` that can only answer 1 is a comparison path with no case for
+the type, and it accounts for every symptom below in one line.
+
 Everything downstream of equality inherits it: `contains?` cannot find a
 symbolliteral in a block that holds it, `unique` will not deduplicate one,
 and any block or dictionary containing one is never equal to a copy of

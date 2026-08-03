@@ -1,2 +1,10 @@
+; A `;;` comment is scanned by the lexer; a `;` comment is not. Inside a `;;`
+; comment, a backslash followed by anything other than a letter hangs the
+; lexer forever. The same line written with a single `;` runs fine, and so
+; does `;; with - dash`. Both forms are stripped from the token stream, so
+; nothing here reaches the program either way.
+;
+; This header is deliberately written with single semicolons.
+
 ;; with \- dash
 print "should print but never does"

@@ -208,8 +208,9 @@ and a half, and a cost per kilobyte that stays flat as the input doubles.
 ## Interpreter bugs
 
 [`bugs/`](bugs/README.md) has minimal repros for three Arturo 0.10.0
-interpreter bugs: a comment that hangs the lexer, a value-less binding that
-exits 1 silently, and a `:symbolliteral` that is not equal to itself. The
+interpreter bugs: a backslash in a `;;` comment that hangs the lexer, a
+value-stack underflow that exits 1 without a word, and a `:symbolliteral`
+that is not equal to itself. The
 first two were found by writing the dialect and the third by running it over
 Arturo's own test suite. A fourth repro is filed alongside them and is not a
 bug: a value left unused inside a callee is popped as an argument by the

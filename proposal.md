@@ -365,17 +365,18 @@ grammar succeeding. Direct left recursion
 nullable prefix, and unbound rule words are all rejected at scan start with
 messages naming the cycle or the word. Writing it also surfaced two
 interpreter bugs worth filing upstream, which is what dogfooding is for
-(minimal repros in `bugs/`): the 0.10.0 lexer does not fully ignore comment
-contents (a `\-` inside a comment hangs it), and binding the result of an
-expression that produces no value (an assignment, a `set`, a call to a
-function whose body ends in one) corrupts the enclosing frame, usually as a
-silent exit. The second was
-misdiagnosed twice, first as "escape blocks cannot assign", which
-accidentally enforced this proposal's own "escapes should compute, not
-mutate" rule, then as a property of `do`. The real trigger is the
-binding, and the draft sidesteps it by evaluating every escape block
-padded with a trailing value (`op ++ [true]`) and discarding the result,
-so escapes may in fact assign freely. A third repro sits beside those two and
+(minimal repros in `bugs/`): the 0.10.0 lexer scans the contents of a `;;`
+comment, where a backslash before anything but a letter hangs it forever,
+and popping an empty value stack ends the run with exit 1 and no message at
+all. The second was misdiagnosed three times, first as "escape blocks cannot
+assign", which accidentally enforced this proposal's own "escapes should
+compute, not mutate" rule, then as a property of `do`, then as a binding
+corrupting the frame. What it actually is: assignment pops a value like any
+other consumer, an escape block ending in an assignment leaves none, and the
+draft sidesteps it by padding every escape block with a trailing value
+(`op ++ [true]`) and discarding the result, so escapes may in fact assign
+freely. Only the silent exit is worth reporting, since a stack that runs dry
+should say so. A third repro sits beside those two and
 is not a bug: a value left unused inside a function is popped as an argument
 by the call enclosing it, which is the value stack working as designed. The
 draft had it filed as a `return` bug until the plain reading was pointed

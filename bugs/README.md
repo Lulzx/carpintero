@@ -8,20 +8,30 @@ repro, and each `issue-*.md` is a draft report ready for
 
 Three are bugs. Number 2 turned out to be the value stack behaving as
 designed, and its draft is now a documentation question rather than a bug
-report. The first three were found by writing the dialect, the fourth by
-*using* it, in the corpus run described in
+report. Number 3 turned out to be the same stack from the other side, and
+shrank to the one thing about it that is a defect. The first three were
+found by writing the dialect, the fourth by *using* it, in the corpus run
+described in
 [the manual](../MANUAL.md#validation-against-arturos-own-source). All four have
 in-language mitigations. Each section names its fix.
 
-## 1. `comment-lexer-hang.art`: lexer does not fully ignore comment contents
+## 1. `comment-lexer-hang.art`: `;;` comment contents are scanned by the lexer
 
-A `\-` sequence inside a line comment hangs the file loader forever (100%
-CPU, no output). Other comment contents produce phantom syntax errors at
-EOF ("missing closing parenthesis") or silent exits, and some failures
-depend on the *combination* of adjacent comment lines, so the same comment
-can be fine in one file and fatal in another. The string-lexer path hangs
-too: `to :block` over the same source read raw never returns either, so
-this is the lexer mishandling comment bytes and not just the file loader.
+A `;` comment is ignored. A `;;` comment is not. A backslash inside one,
+followed by anything that is not a letter, hangs the lexer forever (100%
+CPU, no output), and an unbalanced `(` or `"` inside one raises a syntax
+error. Both are fine with a single semicolon, and neither form contributes
+to the program: `to :block` gives the same tokens either way.
+
+What decides the hang is the character after the backslash. Letters are
+fine, as are `_` and `/`; `-`, `+`, `.`, `,`, `:`, `=`, `<`, `~`, `?`, `!`,
+`|`, `$`, `*`, `)`, a digit, a space and a second backslash all hang. A
+backslash with a word character before it is fine (`;; x\-` runs), which is
+the shape of ordinary path syntax. What once looked like context-dependence
+across adjacent comment lines was this rule and the `;;` distinction.
+
+The string-lexer path hangs too: `to :block` over the same source read raw
+never returns either, so this is the lexer and not just the file loader.
 
 Run: `arturo comment-lexer-hang.art` and it hangs (kill it manually).
 Expected: prints `should print but never does`.
@@ -59,38 +69,47 @@ including `discard loop items 'x [...]`. `carpintero.art` does this
 throughout, which is the language's own tool for the job rather than a
 workaround.
 
-## 3. `valueless-assignment.art`: binding a value-less expression corrupts the frame
+## 3. `stack-underflow-exit.art`: popping an empty value stack exits 1 in silence
 
-Diagnosed twice before it was diagnosed right. First as "`do` of a block
-containing an assignment crashes when the executing function is nested",
-then as "`do` of a block whose last expression produces no value". Both
-were describing the shape that turned up first rather than the rule, which
-is: **an assignment whose right-hand side produces no value exits 1
-silently**. Leaving the same expression unbound is fine.
+Diagnosed three times before it was diagnosed right. First as "`do` of a
+block containing an assignment crashes when the executing function is
+nested", then as "`do` of a block whose last expression produces no value",
+then as "binding a value-less expression corrupts the enclosing frame".
+Each was describing a shape rather than the rule, and the rule is section 2
+again: **assignment pops a value off the stack like any other consumer.**
+
+A right-hand side that produces none pops whatever is underneath, which is
+why `99` on its own line followed by `y: print "hi"` binds 99 and runs to
+completion. It is only the empty stack that ends the process, and that is
+the part worth reporting: **an underflow exits 1 with no message and
+nothing on stderr**, with the last line of output coming from the statement
+*before* the one at fault.
 
 Neither `do` nor nesting is required. Two statements are enough:
-`y: print "hi"` prints and then kills the interpreter. The `do` forms
+`y: print "hi"` prints and then ends the run. The `do` forms
 (`res: do [G\n: 3]`), the value-less function tail (`y: bad 1`), and
-`r: discard ...` are all the same rule reached by different routes, which
+`r: discard ...` are the same statement reached by different routes, which
 is the whole of what looked for so long like depth-dependence.
 
-Run: `arturo valueless-assignment.art`. Expected four lines. Actual:
-three, then silent exit 1. `do-assignment-crash.art` and
+Run: `arturo stack-underflow-exit.art`. Expected five lines. Actual: four,
+then silent exit 1. `do-assignment-crash.art` and
 `do-assignment-tail-crash.art` are the two shapes it was originally found
 in, kept because they are the ones a `do`-using program actually meets.
 
-**Mitigation:** do not bind the result, and where a block must produce
-one, pad it: `discard do blk ++ [true]`. Both halves matter, since
-`res: discard do blk ++ [true]` crashes again: `discard` is value-less
-itself. `carpintero.art` pads its `do` and `defer` escape blocks this way
-and discards the result, so grammar escapes may assign freely.
+**Mitigation:** follows from the mechanism. Pad the block so it leaves a
+value on the stack, and do not bind the result: `discard do blk ++ [true]`.
+Both halves matter, since `res: discard do blk ++ [true]` underflows again,
+`discard` producing nothing of its own. `carpintero.art` pads its `do` and
+`defer` escape blocks this way, so grammar escapes may assign freely.
 
 ## 4. `symbolliteral-equality.art`: a `:symbolliteral` is not equal to itself
 
-`'+ = '+` is `false`. So is `equal? s s` for one and the same value: the
-type is outside reflexive equality entirely, and every spelling is
-affected (`'+ '- '* '^ '~ '=> '-->`). Everything built on equality goes
-with it: `contains?` cannot find one, `unique` will not deduplicate one,
+`compare s s` returns 1 for one and the same value, while `s < s` and
+`s > s` are both `false`, so this is a comparison path with no case for the
+type. Equality inherits it: `'+ = '+` is `false`, so is `equal? s s`, and
+the type is outside reflexive equality entirely. Every spelling is
+affected (`'+ '- '* '^ '~ '=> '-->`), and so is everything built on
+equality: `contains?` cannot find one, `unique` will not deduplicate one,
 and a block holding one is never equal to a byte-identical copy of itself.
 The neighbouring types are all fine: `:symbol` (`<=`), `:literal` (`'foo`)
 and `:word` are reflexively equal, which is what makes this a bug rather
