@@ -1,7 +1,7 @@
 ; A value left unused inside a function body is popped as an argument by the
 ; call that encloses it, and the argument already supplied in that slot is
-; dropped. Every line below would print `expected: 42` if the leftover stayed
-; out of the enclosing argument list.
+; pushed down out of reach. Every line below would print `expected: 42` if
+; the leftover stayed out of the enclosing argument list.
 
 earlyReturn: function [x][
     if x -> return 7
@@ -23,9 +23,14 @@ show "fallthru" viaFallthru 1 2 42      ; expected: 8
 show "call    " viaCall     1 2 42      ; expected: 9
 show "literal " viaLiteral  1 2 42      ; expected: 99
 
-; `return` is not the trigger: a bare literal does the same. The 42 is not
-; consumed later either, it is gone by the end of the statement. A leftover at
-; the top level does reach the next call that wants an argument:
+; `return` is not the trigger: a bare literal does the same. Nothing is lost
+; either. Each displaced 42 stays on the stack and reaches the next call that
+; wants an argument, which is the whole of the feature: all four are still
+; there below, and the first one out lands in `takesOne`.
 
 7
 print                                   ; prints 7
+
+takesOne: function [v][ print ["and the 42 turns up here:" v] ]
+print ["stack after the calls above:" stack]
+takesOne

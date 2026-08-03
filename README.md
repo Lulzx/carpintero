@@ -213,9 +213,9 @@ exits 1 silently, and a `:symbolliteral` that is not equal to itself. The
 first two were found by writing the dialect and the third by running it over
 Arturo's own test suite. A fourth repro is filed alongside them and is not a
 bug: a value left unused inside a callee is popped as an argument by the
-enclosing call, which is the value stack working as designed, and the open
-question there is that the argument it displaces is discarded without a
-word. Each has an in-language workaround, used in `carpintero.art`.
+enclosing call, which is the value stack working as designed, down to the
+displaced argument waiting there for the next call that wants one. Each has
+an in-language workaround, used in `carpintero.art`.
 
 ## Reading
 

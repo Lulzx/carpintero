@@ -14,8 +14,8 @@ question about one consequence of that design.
 ## What happens
 
 A value left unused inside a function body is popped as an argument by the
-call that encloses it. The argument already supplied in that slot is
-dropped.
+call that encloses it. The argument already supplied in that slot is pushed
+down out of reach.
 
 ```arturo
 earlyReturn: function [x][
@@ -68,21 +68,25 @@ deeper in the stack than the callee's leftover.
 
 ## The part worth asking about
 
-The displaced `42` is not consumed later. A following call that wants an
-argument does not receive it, and it is gone by the end of the statement. So
-an unrelated edit inside a callee can take the place of an argument the
-caller already wrote down, and the real one goes nowhere. The caller reads
-correctly, the callee reads correctly, and the wrong value arrives with no
-diagnostic.
+Nothing is lost, either. The displaced `42` stays on the stack, `stack`
+reports it, and the next call that wants an argument receives it:
 
-Two things would help, if the behavior itself is settled:
+```arturo
+takesOne: function [v][ print ["received:" v] ]
 
-1. A note in the function or stack documentation, stating that leftovers
-   inside a body reach the enclosing call's argument list. The stack is
-   documented; this interaction is what took the time to find.
-2. Some way to see it. A displaced argument is discarded silently, and a
-   warning or a debug-mode trace would have made this a five-minute
-   diagnosis.
+show "literal " viaLiteral 1 2 42   ; expected: 99
+print ["stack:" stack]              ; stack: [42 ...]
+takesOne                            ; received: 42
+```
+
+So this is the value stack all the way down, and there is nothing here to
+fix in the interpreter. What is left is a documentation request: a note
+where the stack is described, saying that a leftover inside a function body
+is visible to the argument list of the call enclosing it. The stack is
+documented and `stack` will show you the evidence, but the reading that gets
+you there is not obvious from a call site where both the caller and the
+callee look correct in isolation. Naming the interaction, ideally with this
+shape as the example, would have turned a long hunt into a lookup.
 
 ## Environment
 

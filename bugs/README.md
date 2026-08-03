@@ -36,20 +36,21 @@ through it, successfully.
 
 **Not a bug.** A value left unused inside a function body is popped as an
 argument by the call that encloses it, and the argument already written in
-that slot is dropped. That is the value stack doing what it is documented to
-do: `7` on its own line, followed by an argless `print`, prints 7, and the
-same stack serves both. Nothing leaks anywhere. The argument was sitting
-deeper in the stack than the callee's leftover.
+that slot is pushed down out of reach. That is the value stack doing what it
+is documented to do: `7` on its own line, followed by an argless `print`,
+prints 7, and the same stack serves both. Nothing leaks anywhere. The
+argument was sitting deeper in the stack than the callee's leftover.
 
 `return` is not the trigger either, which is what the first two drafts of
 this section claimed. A bare literal in the body behaves identically, as do
 an ordinary call and a fallthrough value; `loop` over an empty collection is
 the same rule with a `null`.
 
-What is left is the question in `issue-2-stack-leftovers.md`: the displaced
-argument is not consumed later, it is discarded silently at the end of the
-statement, so an edit inside a callee can substitute a value into a caller's
-argument list with no diagnostic.
+Nothing is lost either: the displaced argument stays on the stack, `stack`
+reports it, and the next call that wants one receives it. What is left is
+the documentation request in `issue-2-stack-leftovers.md`, since a call site
+where the caller and the callee are each correct in isolation is a poor
+place to work this out from first principles.
 
 Run: `arturo stack-leftover-args.art`.
 

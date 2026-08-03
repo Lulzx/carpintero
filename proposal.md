@@ -379,9 +379,10 @@ so escapes may in fact assign freely. A third repro sits beside those two and
 is not a bug: a value left unused inside a function is popped as an argument
 by the call enclosing it, which is the value stack working as designed. The
 draft had it filed as a `return` bug until the plain reading was pointed
-out. Passing every unused result through the language's own
-`discard` settles it, and the open question is only that the argument the
-leftover displaces is dropped without a word. Even
+out, and the displaced argument is not lost either, it waits on the stack
+for the next call that wants one. Passing every unused result through the
+language's own `discard` settles it, and all that is left upstream is a
+request to document the interaction. Even
 the lexer bug has an in-language mitigation, and it is the most
 Carpintero-shaped fix imaginable: `read` returns raw source without
 lexing anything, so `loadSafe` strips comments at the string level
