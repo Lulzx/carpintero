@@ -5,7 +5,10 @@
 
 import ./"../carpintero.art"!
 
-funcdef: [:label 'function :block :block]
+;; opt :attribute so a definition carries its options along —
+;; carpintero declares most of its matcher inline, and a rule that
+;; ignored that would quietly miss two thirds of the file
+funcdef: [:label 'function opt :attribute :block :block]
 
 src: to :block read ./"../carpintero.art"
 
@@ -13,5 +16,6 @@ r: scan src [collect 'defs [any [keep funcdef | skip]]]
 
 print ["top-level function definitions in carpintero.art:" size r\defs]
 loop r\defs 'd [
-    print ["   " first d "  " d\2]
+    ; the parameter list is the last block but one
+    print ["   " first d "  " d\[(size d) - 2]]
 ]

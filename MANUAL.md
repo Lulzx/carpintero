@@ -2,7 +2,8 @@
 
 The complete reference for the dialect. The design rationale lives in
 [proposal.md](proposal.md). This document is what you need to *use* it.
-Everything here is exercised by `demo.art` (71 checks) against
+Everything here is exercised by `demo.art` (71 checks, the readable
+tour) and `tests.art` (353 checks, the regression suite) against
 Arturo 0.10.0.
 
 ```red
@@ -258,20 +259,31 @@ e2: [e1 "x" | e1 "y"]
 ; ... twelve levels
 ```
 
-costs 2^12 rule invocations bare (about 1.5 s interpreted) and drops
-to about 5 ms with memoization. Real grammars are effectively linear.
+costs 2^12 rule invocations bare (about 165 ms interpreted) and drops
+to about 1.5 ms with memoization. Real grammars are effectively linear.
 This is what pathological looks like, and `examples/bench.art` will
 show you both numbers on your machine.
 
 ## Performance expectations
 
 An interpreted matcher loses to the native regex engine by roughly
-**four orders of magnitude** (`examples/bench.art`: about 213 ms vs
-0.01 ms validating 200 dates). What the dialect offers instead is
+**four orders of magnitude** (`examples/bench.art`: about 22 ms vs
+0.004 ms validating 200 dates). What the dialect offers instead is
 composability and rules that are data, plus a Phase 3 compiled core
 that narrows the gap without closing it. PEG without memoization is
 exponential in pathological grammars (see above) and effectively
 linear in real ones.
+
+Cost is linear in the length of the input and roughly constant per
+character — `examples/bench.art` ends by scanning inputs that double
+and printing the cost per kilobyte, which should stay flat. If you are
+tuning a grammar, the things that actually move the needle are, in
+order: give an alternation its cheapest discriminating terminal first,
+so dead arms die on their first character; prefer a charset to an
+alternation of literals, since a charset is one table lookup;
+and reach for `scan.memo` only for a rule that is genuinely re-tried
+at the same position, because the table costs more than it saves
+otherwise.
 
 ## PEG pitfalls, and their idiomatic fixes
 
@@ -322,3 +334,33 @@ that hangs `arturo` directly.
 | (none) | `cut`, `scan.memo`, path-qualified block errors | later-generation additions |
 
 The absences are scope decisions, argued in the proposal, not gaps.
+
+## Running the tests
+
+```
+arturo demo.art     # the readable tour, 71 checks
+arturo tests.art    # the regression suite, 353 checks
+arturo tests.art trace
+```
+
+`tests.art` exits nonzero if anything fails and prints every failure with
+what it got and what it wanted. The `trace` argument prints each section
+and each check as it runs, which is how you find a case that *aborts* the
+run rather than merely failing it — a distinction that matters here, since
+a script that upsets the 0.10.0 interpreter tends to exit silently.
+
+Run it from the repository root: the panic cases shell out.
+
+That last part needs explaining, because it looks like over-engineering
+and is not. Grammar errors — an unbound rule word, left recursion, `keep`
+outside `collect` — panic by design, and a panic unwound through `try`
+leaves the abandoned matcher frames' values on the stack, where the next
+statements read them as arguments. The symptom is not a failed assertion;
+it is a run that dies several lines later with no message at all. So each
+of the seventeen panic cases runs in its own interpreter through
+`tests-panics.art`, and counts as passed when that run started and did not
+reach the end. You can run one on its own to see the message:
+
+```
+arturo tests-panics.art left-direct
+```

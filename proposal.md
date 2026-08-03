@@ -551,6 +551,23 @@ implementation.
   behavior should be documented too: PEG without memoization is exponential
   in pathological grammars, effectively linear in real ones, and the manual
   should show what pathological looks like.
+
+  A round of optimization on the draft is worth reporting here, because it
+  changes what the compiled core has left to buy. Validating 200 dates went
+  from 169 ms to 22 ms, a 1400-character JSON document from 361 ms to 86 ms,
+  and `[some digit]` over 32 kB from 2.75 s to 105 ms. Almost none of that
+  came from the grammar engine. Two interpreter properties accounted for it:
+  indexing an Arturo string by position walks the UTF-8 from the front, so a
+  matcher that indexes constantly is quadratic in the length of its input
+  unless it converts to a block of characters first; and a scoped Arturo call
+  that assigns any local costs roughly twenty times one that assigns none, so
+  the cost of the tree walk was mostly the cost of building frames for it,
+  recoverable through `function.inline` wherever no two live instances of the
+  same function can share a scope. Both are worth knowing independently of
+  this package. What they mean for staging is that the remaining gap to
+  `match` is about three and a half orders of magnitude rather than four and
+  a half, and that it is now genuinely the interpreter, not the design — which
+  is the argument for the compiled core, made honestly.
 - **PEG is not CFG**, with the specific costs listed above: hidden prefixes,
   greedy repetition, silent disambiguation.
 - **The comparison is unforgiving.** Rebol's PARSE has had twenty-five years of

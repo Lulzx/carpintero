@@ -1,0 +1,55 @@
+;; tests-panics.art — one grammar error per run.
+;;
+;; A panic unwound through try leaves the abandoned matcher frames
+;; worth of values on the stack, and the next few statements read them
+;; as arguments, so panics cannot be asserted in-process. Each case
+;; gets its own interpreter instead: tests.art runs this file once per
+;; case name and checks that START was printed and SURVIVED was not.
+;;
+;; Run on its own to see a single message:
+;;     arturo tests-panics.art unbound
+
+import ./"carpintero.art"!
+
+CASES: ["inverted-range" "func-word" "capture-name" "keep-outside"
+        "collect-name" "do-block" "defer-block" "fail" "type-on-string"
+        "word-on-string" "quote-on-string" "into-on-string" "unbound"
+        "left-direct" "left-indirect" "left-nullable" "between-bounds"]
+
+which: (empty? arg)? -> "" -> last arg
+
+unless in? which CASES [
+    print ["tests-panics: unknown case" which]
+    print ["known cases:" join.with: " " CASES]
+    panic "tests-panics: bad case name"
+]
+
+print "START"
+
+digit: charset "0-9"
+x: charset "x"
+
+lrdirect: [lrdirect "+" digit | digit]
+lra: [lrb "x" | "a"]
+lrb: [lra "y" | "b"]
+lrn: [opt "a" lrn | "z"]
+
+if which = "inverted-range"  [ discard charset "z-a" ]
+if which = "func-word"       [ discard scan "a" [csComplement] ]
+if which = "capture-name"    [ discard scan "a" [capture x "a"] ]
+if which = "keep-outside"    [ discard scan "a" [keep "a"] ]
+if which = "collect-name"    [ discard scan "a" [collect x [keep "a"]] ]
+if which = "do-block"        [ discard scan "a" [do "a"] ]
+if which = "defer-block"     [ discard scan "a" [defer "a"] ]
+if which = "fail"            [ discard scan "a" ["a" fail "nope"] ]
+if which = "type-on-string"  [ discard scan "a" [:integer] ]
+if which = "word-on-string"  [ discard scan "a" ['function] ]
+if which = "quote-on-string" [ discard scan "a" [quote 1] ]
+if which = "into-on-string"  [ discard scan "a" [into ["a"]] ]
+if which = "unbound"         [ discard scan "x" [nosuchrule] ]
+if which = "left-direct"     [ discard scan "1+2" lrdirect ]
+if which = "left-indirect"   [ discard scan "a" lra ]
+if which = "left-nullable"   [ discard scan "z" lrn ]
+if which = "between-bounds"  [ discard scan "a" [between "x" 2 "a"] ]
+
+print "SURVIVED"

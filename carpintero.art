@@ -35,8 +35,62 @@
 ;;   3. escape blocks are evaluated as op ++ [true]: do of a block
 ;;      whose last expression produces no value corrupts the
 ;;      enclosing frame, and the padding guarantees a value tail
+;;
+;; ── on speed ─────────────────────────────────────────────────────────
+;; This is an interpreted matcher and the proposal is honest about
+;; where that puts it. Six decisions carry most of the difference
+;; between the naive tree walk and what is here, and each one is marked
+;; at its site below:
+;;   S1  string input is converted to a block of characters once, at
+;;       scan start. Indexing an Arturo string by position walks the
+;;       UTF-8 from the front, so the naive matcher is quadratic in the
+;;       length of the input; indexing a block is constant time.
+;;   S2  charsets carry a 128-entry lookup table for the ASCII range,
+;;       so the common terminal is one index instead of a walk over
+;;       ranges.
+;;   S3  grammar words dispatch through one dictionary lookup into an
+;;       integer opcode, and a named rule is the cheap case rather
+;;       than the twenty-string-comparison case.
+;;   S4  named rules resolve through the table the pre-pass already
+;;       built, and terminals reached through a rule name are matched
+;;       directly, with no wrapper block allocated per invocation.
+;;   S5  the stacks the error report needs — enclosing rules, terminal
+;;       names, cut frames — are blocks with a separate depth counter,
+;;       pushed by overwriting rather than by appending.
+;;   S6  every matcher function that assigns a local is declared
+;;       inline, because a scoped Arturo call that assigns anything at
+;;       all costs about twenty times one that does not. An inline
+;;       body runs in its caller scope, so their locals are prefixed
+;;       per function and none of them is read after a call that could
+;;       re-enter it. matchElem keeps a scope of its own, and that is
+;;       what makes the rest safe: it stands between any two nested
+;;       invocations of the same inline function, so no two live
+;;       instances ever share a scope.
+;; Failure descriptions are built only on the failure path, which
+;; matters because most terminal attempts in a backtracking parse fail.
 
 ;; ── charsets ─────────────────────────────────────────────────────────
+
+;; S2: every charset carries ascii, a 128-entry membership table. Code
+;; points above 127 fall back to the range walk, so the table is an
+;; index for the common case and never a limit on what a set can hold.
+csMake: function [spec ranges][
+    asc: array.of: 128 false
+    unless empty? ranges [
+        loop ranges 'r [
+            lo: r\0
+            if lo < 128 [
+                hi: (r\1 > 127)? -> 127 -> r\1
+                i: lo
+                while [i =< hi][
+                    asc\[i]: true
+                    i: i + 1
+                ]
+            ]
+        ]
+    ]
+    #[kind: 'charset  spec: spec  ranges: ranges  ascii: asc]
+]
 
 charset: function [spec][
     ranges: []
@@ -70,14 +124,14 @@ charset: function [spec][
             i: i + 1
         ]
     ]
-    #[kind: 'charset  spec: spec  ranges: ranges]
+    csMake spec ranges
 ]
 
 ;; charsets are values and compose. The plain words union and
 ;; intersection belong to core, for blocks, so these carry a cs prefix.
 
 csUnion: function [a b][
-    #[kind: 'charset  spec: ~"|a\spec|+|b\spec|"  ranges: a\ranges ++ b\ranges]
+    csMake ~"|a\spec|+|b\spec|" a\ranges ++ b\ranges
 ]
 
 csIntersect: function [a b][
@@ -93,7 +147,7 @@ csIntersect: function [a b][
             ]
         ]
     ]
-    #[kind: 'charset  spec: ~"|a\spec|&|b\spec|"  ranges: out]
+    csMake ~"|a\spec|&|b\spec|" out
 ]
 
 ;; selection sort by low bound, since core sort has no order guarantee
@@ -132,18 +186,21 @@ csComplement: function [cs][
         ]
     ]
     if prev < 1114112 [ out: append out @[@[prev 1114111]] ]
-    #[kind: 'charset  spec: ~"not |cs\spec|"  ranges: out]
+    csMake ~"not |cs\spec|" out
 ]
 
-csMatch?: function [cs c][
-    cp: to :integer c
-    hit: false
-    unless empty? cs\ranges [
-        loop cs\ranges 'r [
-            if and? (cp >= r\0) (cp =< r\1) -> hit: true
-        ]
+csMatch?: function.inline [cmCs cmC][
+    cmCp: to :integer cmC
+    if cmCp < 128 -> return cmCs\ascii\[cmCp]
+    cmRs: cmCs\ranges
+    cmN: size cmRs
+    cmI: 0
+    while [cmI < cmN][
+        cmR: cmRs\[cmI]
+        if and? (cmCp >= cmR\0) (cmCp =< cmR\1) -> return true
+        cmI: cmI + 1
     ]
-    hit
+    false
 ]
 
 ;; ── matcher state ────────────────────────────────────────────────────
@@ -151,29 +208,47 @@ csMatch?: function [cs c][
 ;; of name, start and end; values materialize only on overall success,
 ;; and rollback is truncation — see Backtracking semantics in the
 ;; proposal.
-
-CS: #[inp: ""  len: 0  log: []  isblk: false  farpath: []  exp: []  coldepth: 0
-      rules: []  dsc: []  ctx: ""  quiet: 0  path: []  cuts: []]
+;;
+;; S1: inp is always a block. Block input is itself; string input is
+;; converted to a block of characters once, at scan start, because
+;; indexing an Arturo string by position is linear in the position —
+;; the matcher indexes constantly, so on a string it would be
+;; quadratic in the length of the input. Captures over string input
+;; join their slice back into a string on the way out.
+;;
+;; S5: rules, dsc and cuts are stacks kept as a block plus a depth,
+;; pushed by overwriting a slot when one is free. Appending and
+;; chopping would allocate on every named rule and every choice block.
+CS: #[inp: []  len: 0  log: []  isblk: false  farpath: []  exp: []  coldepth: 0
+      rules: []  nrules: 0  dscw: ""  ctx: ""  quiet: 0  path: []
+      cuts: []  ncuts: 0  reg: #[]]
 
 ;; per-scan memoization state: rules holds the names opted in through
 ;; scan.memo, tab the results keyed by rule name, descent path and
-;; position — see No packrat memoization in the proposal
-MC: #[rules: []  tab: #[]]
+;; position — see No packrat memoization in the proposal. on is the
+;; guard that keeps an unmemoized scan out of the lookup entirely.
+MC: #[on: false  rules: []  tab: #[]]
 
-logMark: function [][size CS\log]
+;; literal strings compared against character input, cached as blocks
+;; of characters so the comparison is index against index
+LITS: #[]
 
-logTrim: function [sz][
-    if (size CS\log) > sz [
-        CS\log: (sz = 0)? -> [] -> slice CS\log 0 sz - 1
-    ]
-    true
+litChars: function.inline [lcS][
+    if key? LITS lcS -> return LITS\[lcS]
+    lcB: map lcS 'c -> c
+    LITS\[lcS]: lcB
+    lcB
 ]
 
 ;; record a terminal failure for the farthest-failure error report,
 ;; then fail — see Error reporting in the proposal. Three refinements
 ;; over the bare high-water mark:
-;;   dsc, a stack of terminal-rule names, so a charset failing inside
-;;     the rule digit reports the word digit and not its internals
+;;   dscw, the name of the terminal rule being matched, so a charset
+;;     failing inside the rule digit reports the word digit and not
+;;     its internals. One slot rather than a stack: the value of a
+;;     terminal rule is a terminal, so it never invokes another rule
+;;     and the nesting never reaches two. It holds the rule word
+;;     unconverted, and only the failure path pays for the name
 ;;   rules, a stack of enclosing block rules and capture names, whose
 ;;     top becomes the while-matching context of the report
 ;;   quiet, a counter that suppresses recording inside the operand of
@@ -186,176 +261,331 @@ FARTHER: 2
 SAMEPOS: 1
 NEARER:  0
 
-cmpPath: function [a b][
-    na: size a
-    nb: size b
-    i: 0
-    while [and? [i < na] [i < nb]][
-        if (a\[i]) > (b\[i]) -> return FARTHER
-        if (a\[i]) < (b\[i]) -> return NEARER
-        i: i + 1
+;; What a terminal was, passed to failAt as a kind and the value
+;; itself. Rendering it costs an interpolation, and most failures are
+;; behind the high-water mark and never reported, so the description is
+;; built only once failAt has decided to keep it.
+DTEXT:  0
+DLIT:   1
+DCSET:  2
+DCHAR:  3
+DTYPE:  4
+DWORD:  5
+
+failDesc: function.inline [fdKind fdVal][
+    if fdKind = DLIT  -> return ~"literal |fdVal|"
+    if fdKind = DCSET -> return ~"charset |fdVal\spec|"
+    if fdKind = DCHAR -> return ~"char |fdVal|"
+    if fdKind = DTYPE -> return to :string fdVal
+    if fdKind = DWORD -> return ~"word |to :string fdVal|"
+    fdVal
+]
+
+cmpPath: function.inline [cpA cpB][
+    cpNa: size cpA
+    cpNb: size cpB
+    cpI: 0
+    while [and? [cpI < cpNa] [cpI < cpNb]][
+        if (cpA\[cpI]) > (cpB\[cpI]) -> return FARTHER
+        if (cpA\[cpI]) < (cpB\[cpI]) -> return NEARER
+        cpI: cpI + 1
     ]
-    if na > nb -> return FARTHER
-    if na < nb -> return NEARER
+    if cpNa > cpNb -> return FARTHER
+    if cpNa < cpNb -> return NEARER
     SAMEPOS
 ]
 
-failAt: function [pos what][
+failAt: function.inline [faPos faKind faVal][
     if CS\quiet > 0 -> return null
-    shown: (empty? CS\dsc)? -> what -> last CS\dsc
-    fp: CS\path ++ @[pos]
-    c: cmpPath fp CS\farpath
-    if c = FARTHER [
-        CS\farpath: fp
+    ; the flat case — no into descent in progress and none recorded —
+    ; is the whole of string scanning and most of block scanning, and
+    ; it compares two integers instead of building and ordering paths
+    if and? (empty? CS\path) ((size CS\farpath) < 2) [
+        faHad: not? empty? CS\farpath
+        faFar: (faHad)? -> CS\farpath\[0] -> (0 - 1)
+        if faPos < faFar -> return null
+        faShown: (CS\dscw = "")? -> (failDesc faKind faVal) -> to :string CS\dscw
+        if faPos > faFar [
+            if faHad [ CS\farpath\[0]: faPos ]
+            unless faHad [ CS\farpath: @[faPos] ]
+            CS\exp: []
+        ]
+        if empty? CS\exp [
+            CS\ctx: (CS\nrules = 0)? -> "" -> CS\rules\[CS\nrules - 1]
+        ]
+        unless in? faShown CS\exp [ CS\exp: append CS\exp faShown ]
+        return null
+    ]
+    faShown: (CS\dscw = "")? -> (failDesc faKind faVal) -> to :string CS\dscw
+    faFp: CS\path ++ @[faPos]
+    faC: cmpPath faFp CS\farpath
+    if faC = FARTHER [
+        CS\farpath: faFp
         CS\exp: []
     ]
-    unless c = NEARER [
+    unless faC = NEARER [
         if empty? CS\exp [
-            CS\ctx: (empty? CS\rules)? -> "" -> last CS\rules
+            CS\ctx: (CS\nrules = 0)? -> "" -> CS\rules\[CS\nrules - 1]
         ]
-        unless in? shown CS\exp [ CS\exp: append CS\exp shown ]
+        unless in? faShown CS\exp [ CS\exp: append CS\exp faShown ]
     ]
     null
 ]
 
 ;; ── rule structure ───────────────────────────────────────────────────
+;; S3: one dictionary from grammar word to opcode, in rough order of
+;; how often the matcher meets each. A word absent from it is a named
+;; rule, which is the case the dispatch reaches first and cheapest.
 
-KEYWORDS: ["some" "any" "opt" "between" "capture" "to" "thru" "skip" "end" "quote" "ahead" "not" "collect" "keep" "do" "fail" "into" "cut" "defer"]
+KWCODE: #[
+    "skip":    1   "some":  2   "any":    3   "opt":   4   "capture": 5
+    "not":     6   "ahead": 7   "to":     8   "thru":  9   "end":    10
+    "keep":   11   "collect": 12  "into": 13   "between": 14
+    "do":     15   "defer": 16  "cut":   17   "quote": 18  "fail":   19
+]
+
+;; the reserved vocabulary, for anyone who needs to ask whether a word
+;; is one — derived, so it cannot drift from what the matcher dispatches
+KEYWORDS: keys KWCODE
+
+;; how many items past its own word each keyword occupies, as a code:
+;;   0  the word alone
+;;   1  the word and one rule element
+;;   2  a name and one rule element
+;;   3  two bounds and one rule element
+;;   4  the word and one literal value
+SPANKIND: [0 0 1 1 1 2 1 1 1 1 0 1 2 1 3 4 4 0 4 4]
 
 ;; number of items the element starting at idx occupies
-elemSpan: function [items idx][
-    it: items\[idx]
-    if integer? it -> return 1 + elemSpan items idx + 1
-    unless word? it -> return 1
-    w: to :string it
-    if in? w ["some" "any" "opt" "to" "thru" "ahead" "not" "keep" "into"] -> return 1 + elemSpan items idx + 1
-    if w = "between" -> return 3 + elemSpan items idx + 3
-    if in? w ["capture" "collect"] -> return 2 + elemSpan items idx + 2
-    if in? w ["quote" "do" "fail" "defer"] -> return 2
-    1
+;; inline and self-recursive at once: the recursive call is the last
+;; thing the body does with its own names, so an inner invocation
+;; overwriting them is harmless
+elemSpan: function.inline [esItems esIdx][
+    esIt: esItems\[esIdx]
+    if integer? esIt -> return 1 + elemSpan esItems esIdx + 1
+    unless word? esIt -> return 1
+    unless key? KWCODE esIt -> return 1
+    esKd: SPANKIND\[KWCODE\[esIt]]
+    if esKd = 0 -> return 1
+    if esKd = 1 -> return 1 + elemSpan esItems esIdx + 1
+    if esKd = 2 -> return 2 + elemSpan esItems esIdx + 2
+    if esKd = 3 -> return 3 + elemSpan esItems esIdx + 3
+    2
 ]
+
+;; the bar that separates alternatives, as a value, so splitting a
+;; block compares symbols instead of rendering each one to a string
+BAR: first [|]
 
 ;; ── the matcher ──────────────────────────────────────────────────────
 ;; Every match* function returns the new input position, or null on
-;; failure, and guarantees the capture log is unchanged after a failure.
+;; failure.
+;;
+;; The capture log rolls back at the points where a failure is
+;; swallowed and matching carries on — a failed alternative in a
+;; choice, a failed iteration of a repetition, a probe of to or thru,
+;; the operand of opt, the operand of not. Everywhere else a failure
+;; propagates, and the roll-back happens at whichever of those points
+;; catches it, so an element in a sequence needs no wrapper of its own.
+;; That is the difference between one interpreted call per element and
+;; two, on the hottest path there is.
 
-matchElem: function [items idx pos][
-    sz: logMark
-    p: matchElemRaw items idx pos
-    if null? p [ discard logTrim sz ]
-    p
+;; A position is never negative, so this can stand for the answer
+;; matchOne gives when the element is not one it handles.
+NOTSIMPLE: 0 - 2
+
+;; The fast path off matchElem, for the elements that make up most of
+;; a grammar: a literal, a charset, a character, a type or word
+;; terminal, or a rule name standing for one of those. None of them
+;; can recurse and none of them writes to the capture log, so this
+;; needs neither a scope nor a rollback, and the element is matched
+;; without the interpreter building a frame for it. Anything else
+;; comes back as NOTSIMPLE and goes the long way round.
+matchOne: function.inline [oItems oIdx oPos][
+    oIt: oItems\[oIdx]
+    if word? oIt [
+        if key? KWCODE oIt -> return NOTSIMPLE
+        ; a memoized rule has to go through the table, so it takes the
+        ; long way; the rest of the grammar keeps the fast path
+        if MC\on [
+            if in? to :string oIt MC\rules -> return NOTSIMPLE
+        ]
+        unless key? CS\reg oIt -> return NOTSIMPLE
+        oV: CS\reg\[oIt]
+        if block? oV -> return NOTSIMPLE
+        oOld: CS\dscw
+        CS\dscw: oIt
+        oP: matchValue oV oPos
+        CS\dscw: oOld
+        return oP
+    ]
+    if integer? oIt -> return NOTSIMPLE
+    if block? oIt -> return NOTSIMPLE
+    matchValue oIt oPos
 ]
 
-matchElemRaw: function [items idx pos][
+;; a terminal value, matched directly. Split out from matchElem so
+;; that a rule name standing for a terminal reaches it without the
+;; matcher allocating a one-element block to hold the value (S4).
+;; Nothing here writes to the capture log, so none of it needs the
+;; rollback wrapper either.
+matchValue: function.inline [vIt vPos][
+    if string? vIt [
+        if CS\isblk [
+            if vPos < CS\len [
+                vEl: CS\inp\[vPos]
+                if and? (string? vEl) (vEl = vIt) -> return vPos + 1
+            ]
+            return failAt vPos DLIT vIt
+        ]
+        vN: size vIt
+        if vN = 0 -> return vPos
+        if (vPos + vN) =< CS\len [
+            if vN = 1 [
+                if (CS\inp\[vPos]) = vIt\[0] -> return vPos + 1
+                return failAt vPos DLIT vIt
+            ]
+            vLit: litChars vIt
+            vJ: 0
+            while [vJ < vN][
+                unless (CS\inp\[vPos + vJ]) = vLit\[vJ] -> return failAt vPos DLIT vIt
+                vJ: vJ + 1
+            ]
+            return vPos + vN
+        ]
+        return failAt vPos DLIT vIt
+    ]
+    if dictionary? vIt [
+        if vPos < CS\len [
+            vEl: CS\inp\[vPos]
+            if CS\isblk [
+                unless char? vEl -> return failAt vPos DCSET vIt
+            ]
+            ; S2 inline: the ASCII table settles the common terminal
+            ; without a call
+            vCp: to :integer vEl
+            vOk: (vCp < 128)? -> vIt\ascii\[vCp] -> csMatch? vIt vEl
+            if vOk -> return vPos + 1
+        ]
+        return failAt vPos DCSET vIt
+    ]
+    if block? vIt -> return matchBlock vIt vPos
+    if char? vIt [
+        if vPos < CS\len [
+            if (CS\inp\[vPos]) = vIt -> return vPos + 1
+        ]
+        return failAt vPos DCHAR vIt
+    ]
+    if type? vIt [
+        unless CS\isblk -> panic "carpintero: type terminals need block input"
+        if vPos < CS\len [
+            if (type CS\inp\[vPos]) = vIt -> return vPos + 1
+        ]
+        return failAt vPos DTYPE vIt
+    ]
+    if literal? vIt [
+        unless CS\isblk -> panic "carpintero: literal word terminals need block input"
+        if vPos < CS\len [
+            vEl: CS\inp\[vPos]
+            if word? vEl [
+                if (to :string vEl) = to :string vIt -> return vPos + 1
+            ]
+        ]
+        return failAt vPos DWORD vIt
+    ]
+    panic ~"carpintero: unexpected item in rule: |vIt|"
+]
+
+matchElem: function [items idx pos][
     it: items\[idx]
 
-    if string? it [
-        if CS\isblk [
-            desc: ~"literal |it|"
-            if pos >= CS\len -> return failAt pos desc
-            el: CS\inp\[pos]
-            if and? (string? el) (el = it) -> return pos + 1
-            return failAt pos desc
-        ]
-        n: size it
-        if n = 0 -> return pos
-        desc: ~"literal |it|"
-        if (pos + n) > CS\len -> return failAt pos desc
-        if (slice CS\inp pos pos + n - 1) = it -> return pos + n
-        return failAt pos desc
-    ]
-    if char? it [
-        desc: ~"char |it|"
-        if pos >= CS\len -> return failAt pos desc
-        if CS\isblk [
-            el: CS\inp\[pos]
-            if and? (char? el) (el = it) -> return pos + 1
-            return failAt pos desc
-        ]
-        if (CS\inp\[pos]) = it -> return pos + 1
-        return failAt pos desc
-    ]
-    if block? it -> return matchBlock it pos
-    if dictionary? it [
-        desc: ~"charset |it\spec|"
-        if pos >= CS\len -> return failAt pos desc
-        if CS\isblk [
-            el: CS\inp\[pos]
-            unless char? el -> return failAt pos desc
-            return (csMatch? it el)? -> pos + 1 -> failAt pos desc
-        ]
-        if csMatch? it CS\inp\[pos] -> return pos + 1
-        return failAt pos desc
-    ]
-    if type? it [
-        unless CS\isblk -> panic "carpintero: type terminals need block input"
-        desc: to :string it
-        if pos >= CS\len -> return failAt pos desc
-        if (type CS\inp\[pos]) = it -> return pos + 1
-        return failAt pos desc
-    ]
-    if literal? it [
-        unless CS\isblk -> panic "carpintero: literal word terminals need block input"
-        desc: ~"word |to :string it|"
-        if pos >= CS\len -> return failAt pos desc
-        el: CS\inp\[pos]
-        unless word? el -> return failAt pos desc
-        return ((to :string el) = to :string it)? -> pos + 1 -> failAt pos desc
-    ]
-    if integer? it [
-        p: pos
-        if it > 0 [
-            loop 1..it 'k [
-                p2: matchElem items idx + 1 p
-                if null? p2 -> return null
-                p: p2
-            ]
-        ]
-        return p
-    ]
     if word? it [
-        w: to :string it
-        if w = "skip" -> return (pos < CS\len)? -> pos + 1 -> failAt pos "any value"
-        if w = "end"  -> return (pos = CS\len)? -> pos -> failAt pos "end of input"
-        if w = "some" -> return matchMany items idx + 1 pos true
-        if w = "any"  -> return matchMany items idx + 1 pos false
-        if w = "opt" [
-            p: matchElem items idx + 1 pos
-            return (null? p)? -> pos -> p
-        ]
-        if w = "to"   -> return matchScan items idx + 1 pos false
-        if w = "thru" -> return matchScan items idx + 1 pos true
-        if w = "between" [
-            lo: items\[idx + 1]
-            hi: items\[idx + 2]
-            unless and? (integer? lo) (integer? hi) [
-                panic "carpintero: between expects two integer bounds"
+        ; a named rule, the single dispatch point the proposal keeps
+        ; for opt-in memoization. Resolution goes through the table the
+        ; pre-pass built, and a rule standing for a terminal is matched
+        ; without a wrapper block being allocated to carry it (S4).
+        unless key? KWCODE it [
+            if MC\on [
+                ws: to :string it
+                if in? ws MC\rules -> return matchNamedMemo ws pos
             ]
-            return matchBetween items idx + 3 pos lo hi
+            unless key? CS\reg it [
+                panic ~"carpintero: unbound rule word '|to :string it|'"
+            ]
+            v: CS\reg\[it]
+            if block? v [
+                if CS\nrules < size CS\rules [ CS\rules\[CS\nrules]: it ]
+                unless CS\nrules < size CS\rules [ CS\rules: append CS\rules it ]
+                CS\nrules: CS\nrules + 1
+                p: matchBlock v pos
+                CS\nrules: CS\nrules - 1
+                return p
+            ]
+            old: CS\dscw
+            CS\dscw: it
+            p: matchValue v pos
+            CS\dscw: old
+            return p
         ]
-        if w = "capture" [
+        k: KWCODE\[it]
+
+        if k = 1 -> return (pos < CS\len)? -> pos + 1 -> failAt pos DTEXT "any value"
+        if k = 2 -> return matchMany items idx + 1 pos true
+        if k = 3 -> return matchMany items idx + 1 pos false
+        if k = 4 [
+            sz: size CS\log
+            p: matchOne items idx + 1 pos
+            if p = NOTSIMPLE -> p: matchElem items idx + 1 pos
+            if null? p [
+                if (size CS\log) > sz [
+                    CS\log: (sz = 0)? -> [] -> slice CS\log 0 sz - 1
+                ]
+                return pos
+            ]
+            return p
+        ]
+        if k = 5 [
             nm: items\[idx + 1]
             unless literal? nm [
                 panic "carpintero: capture expects a literal name, as in: capture 'year rule"
             ]
-            CS\rules: append CS\rules to :string nm
+            nms: to :string nm
+            if CS\nrules < size CS\rules [ CS\rules\[CS\nrules]: nms ]
+            unless CS\nrules < size CS\rules [ CS\rules: append CS\rules nms ]
+            CS\nrules: CS\nrules + 1
             p: matchElem items idx + 2 pos
-            CS\rules: chop CS\rules
+            CS\nrules: CS\nrules - 1
             if null? p -> return null
-            CS\log: append CS\log @[@["cap" to :string nm  pos  p  CS\inp]]
+            CS\log: append CS\log @[@["cap" nms pos p CS\inp]]
             return p
         ]
-        if w = "ahead" [
+        if k = 6 [
+            CS\quiet: CS\quiet + 1
+            sz: size CS\log
+            p: matchElem items idx + 1 pos
+            CS\quiet: CS\quiet - 1
+            ; either way the operand leaves nothing behind: it failed,
+            ; or it succeeded and not fails on its account
+            if (size CS\log) > sz [
+                CS\log: (sz = 0)? -> [] -> slice CS\log 0 sz - 1
+            ]
+            return (null? p)? -> pos -> null
+        ]
+        if k = 7 [
             p: matchElem items idx + 1 pos
             return (null? p)? -> null -> pos
         ]
-        if w = "not" [
-            CS\quiet: CS\quiet + 1
+        if k = 8 -> return matchScan items idx + 1 pos false
+        if k = 9 -> return matchScan items idx + 1 pos true
+        if k = 10 -> return (pos = CS\len)? -> pos -> failAt pos DTEXT "end of input"
+        if k = 11 [
+            if CS\coldepth = 0 -> panic "carpintero: keep outside collect"
             p: matchElem items idx + 1 pos
-            CS\quiet: CS\quiet - 1
-            return (null? p)? -> pos -> null
+            if null? p -> return null
+            CS\log: append CS\log @[@["keep" "" pos p CS\inp]]
+            return p
         ]
-        if w = "collect" [
+        if k = 12 [
             nm: items\[idx + 1]
             unless literal? nm [
                 panic "carpintero: collect expects a literal name, as in: collect 'items rule"
@@ -368,53 +598,11 @@ matchElemRaw: function [items idx pos][
             CS\log: append CS\log @[@["cclose" "" 0 0]]
             return p
         ]
-        if w = "keep" [
-            if CS\coldepth = 0 -> panic "carpintero: keep outside collect"
-            p: matchElem items idx + 1 pos
-            if null? p -> return null
-            CS\log: append CS\log @[@["keep" "" pos p CS\inp]]
-            return p
-        ]
-        if w = "do" [
-            op: items\[idx + 1]
-            unless block? op -> panic "carpintero: do expects a block of host code"
-            ; padded with a trailing value before evaluation: do of a
-            ; block whose last expression produces no value corrupts
-            ; the enclosing frame — see bugs, do-assignment-crash.
-            ; With the padding, escape blocks may assign, mutate via
-            ; set, or call zero-arity functions freely.
-            discard do op ++ [true]
-            return pos
-        ]
-        if w = "fail" [
-            msg: items\[idx + 1]
-            panic ~"carpintero: |msg| at position |pos|"
-        ]
-        ; cut: commit the innermost enclosing choice block — once
-        ; matching passes cut, a later failure in this alternative
-        ; stops the whole choice instead of trying the next arm
-        if w = "cut" [
-            unless empty? CS\cuts [
-                CS\cuts\[(size CS\cuts) - 1]: true
-            ]
-            return pos
-        ]
-        ; defer: a host escape queued in the capture log during
-        ; matching and run only on overall success, in match order —
-        ; so it rolls back with a dead branch like a capture does,
-        ; and runs exactly once per successful scan
-        if w = "defer" [
-            op: items\[idx + 1]
-            unless block? op -> panic "carpintero: defer expects a block of host code"
-            CS\log: append CS\log @[@["defer" op 0 0]]
-            return pos
-        ]
-        if w = "into" [
+        if k = 13 [
             unless CS\isblk -> panic "carpintero: into needs block input"
-            desc: "a nested block"
-            if pos >= CS\len -> return failAt pos desc
+            if pos >= CS\len -> return failAt pos DTEXT "a nested block"
             el: CS\inp\[pos]
-            unless block? el -> return failAt pos desc
+            unless block? el -> return failAt pos DTEXT "a nested block"
             ; descend: swap the input for the nested block, match the
             ; operand against all of it, then restore. The descent
             ; index joins the failure path, so nested failures report
@@ -429,7 +617,7 @@ matchElemRaw: function [items idx pos][
             if null? inner -> done: true
             unless done [
                 unless inner = size el [
-                    discard failAt inner "end of nested block"
+                    discard failAt inner DTEXT "end of nested block"
                     done: true
                 ]
             ]
@@ -439,34 +627,88 @@ matchElemRaw: function [items idx pos][
             if done -> return null
             return pos + 1
         ]
-        if w = "quote" [
+        if k = 14 [
+            lo: items\[idx + 1]
+            hi: items\[idx + 2]
+            unless and? (integer? lo) (integer? hi) [
+                panic "carpintero: between expects two integer bounds"
+            ]
+            return matchBetween items idx + 3 pos lo hi
+        ]
+        if k = 15 [
+            op: items\[idx + 1]
+            unless block? op -> panic "carpintero: do expects a block of host code"
+            ; padded with a trailing value before evaluation: do of a
+            ; block whose last expression produces no value corrupts
+            ; the enclosing frame — see bugs, do-assignment-crash.
+            ; With the padding, escape blocks may assign, mutate via
+            ; set, or call zero-arity functions freely.
+            discard do op ++ [true]
+            return pos
+        ]
+        ; defer: a host escape queued in the capture log during
+        ; matching and run only on overall success, in match order —
+        ; so it rolls back with a dead branch like a capture does,
+        ; and runs exactly once per successful scan
+        if k = 16 [
+            op: items\[idx + 1]
+            unless block? op -> panic "carpintero: defer expects a block of host code"
+            CS\log: append CS\log @[@["defer" op 0 0]]
+            return pos
+        ]
+        ; cut: commit the innermost enclosing choice block — once
+        ; matching passes cut, a later failure in this alternative
+        ; stops the whole choice instead of trying the next arm
+        if k = 17 [
+            if CS\ncuts > 0 [ CS\cuts\[CS\ncuts - 1]: true ]
+            return pos
+        ]
+        if k = 18 [
             unless CS\isblk -> panic "carpintero: quote needs block input"
             if pos >= CS\len -> return null
             v: items\[idx + 1]
             return ((CS\inp\[pos]) = v)? -> pos + 1 -> null
         ]
-        ; a named rule, the single dispatch point the proposal keeps
-        ; for opt-in memoization
-        unless set? w -> panic ~"carpintero: unbound rule word '|w|'"
-        if in? w MC\rules -> return matchNamedMemo w pos
-        return matchNamed w pos
+        ; k = 19, fail
+        panic ~"carpintero: |items\[idx + 1]| at position |pos|"
     ]
-    panic ~"carpintero: unexpected item in rule: |it|"
-]
 
-;; a named rule. A block rule becomes while-matching context; a
-;; terminal rule lends its name to the expected report.
-matchNamed: function [w pos][
-    v: var w
-    if block? v [
-        CS\rules: append CS\rules w
-        p: matchElem @[v] 0 pos
-        CS\rules: chop CS\rules
+    ; N R: the count is a retry-free loop, so a failed iteration just
+    ; propagates and is rolled back by whoever catches it
+    if integer? it [
+        p: pos
+        if it > 0 [
+            loop 1..it 'k [
+                p2: matchOne items idx + 1 p
+                if p2 = NOTSIMPLE -> p2: matchElem items idx + 1 p
+                if null? p2 -> return null
+                p: p2
+            ]
+        ]
         return p
     ]
-    CS\dsc: append CS\dsc w
-    p: matchElem @[v] 0 pos
-    CS\dsc: chop CS\dsc
+
+    matchValue it pos
+]
+
+;; a named rule reached through the memo path, which needs a name it
+;; can key a table with. The inline dispatch in matchElem is the same
+;; thing without the string.
+matchNamed: function [w pos][
+    unless key? CS\reg w -> panic ~"carpintero: unbound rule word '|w|'"
+    v: CS\reg\[w]
+    if block? v [
+        if CS\nrules < size CS\rules [ CS\rules\[CS\nrules]: w ]
+        unless CS\nrules < size CS\rules [ CS\rules: append CS\rules w ]
+        CS\nrules: CS\nrules + 1
+        p: matchBlock v pos
+        CS\nrules: CS\nrules - 1
+        return p
+    ]
+    old: CS\dscw
+    CS\dscw: w
+    p: matchValue v pos
+    CS\dscw: old
     p
 ]
 
@@ -477,7 +719,7 @@ matchNamed: function [w pos][
 ;; Two documented losses on a hit: a do escape inside the rule does
 ;; not re-run, and the farthest-failure report is not re-recorded.
 matchNamedMemo: function [w pos][
-    pk: join.with: "," CS\path ++ @[pos]
+    pk: (empty? CS\path)? -> (to :string pos) -> (join.with: "," CS\path ++ @[pos])
     mkey: ~"|w|@|pk|"
     if key? MC\tab mkey [
         hit: MC\tab\[mkey]
@@ -487,7 +729,7 @@ matchNamedMemo: function [w pos][
         ]
         return hit\0
     ]
-    mark: logMark
+    mark: size CS\log
     p: matchNamed w pos
     stored: []
     unless null? p [
@@ -501,96 +743,141 @@ matchNamedMemo: function [w pos][
 
 ;; some / any: greedy repetition with the mandatory progress guard —
 ;; an iteration that matches without consuming ends the loop
-matchMany: function [items idx pos needOne][
-    p: matchElem items idx pos
-    if null? p -> return (needOne)? -> null -> pos
-    going: true
-    while [going][
-        p2: matchElem items idx p
-        going: false
-        unless null? p2 [
-            unless p2 = p [
-                p: p2
-                going: true
+matchMany: function.inline [qItems qIdx qPos qNeed][
+    qSz: size CS\log
+    qP: matchOne qItems qIdx qPos
+    if qP = NOTSIMPLE -> qP: matchElem qItems qIdx qPos
+    if null? qP [
+        if (size CS\log) > qSz [
+            CS\log: (qSz = 0)? -> [] -> slice CS\log 0 qSz - 1
+        ]
+        return (qNeed)? -> null -> qPos
+    ]
+    qGo: true
+    while [qGo][
+        qSz: size CS\log
+        qP2: matchOne qItems qIdx qP
+        if qP2 = NOTSIMPLE -> qP2: matchElem qItems qIdx qP
+        qGo: false
+        if null? qP2 [
+            if (size CS\log) > qSz [
+                CS\log: (qSz = 0)? -> [] -> slice CS\log 0 qSz - 1
+            ]
+        ]
+        unless null? qP2 [
+            unless qP2 = qP [
+                qP: qP2
+                qGo: true
             ]
         ]
     ]
-    p
+    qP
 ]
 
-matchBetween: function [items idx pos lo hi][
-    cnt: 0
-    p: pos
-    going: true
-    while [and? going (cnt < hi)][
-        p2: matchElem items idx p
-        going: false
-        unless null? p2 [
-            unless p2 = p [
-                p: p2
-                cnt: cnt + 1
-                going: true
+matchBetween: function.inline [wItems wIdx wPos wLo wHi][
+    wCnt: 0
+    wP: wPos
+    wGo: true
+    while [and? wGo (wCnt < wHi)][
+        wSz: size CS\log
+        wP2: matchOne wItems wIdx wP
+        if wP2 = NOTSIMPLE -> wP2: matchElem wItems wIdx wP
+        wGo: false
+        if null? wP2 [
+            if (size CS\log) > wSz [
+                CS\log: (wSz = 0)? -> [] -> slice CS\log 0 wSz - 1
+            ]
+        ]
+        unless null? wP2 [
+            unless wP2 = wP [
+                wP: wP2
+                wCnt: wCnt + 1
+                wGo: true
             ]
         ]
     ]
-    (cnt >= lo)? -> p -> null
+    (wCnt >= wLo)? -> wP -> null
 ]
 
 ;; to / thru: advance until the operand matches
-matchScan: function [items idx pos inclusive][
-    i: pos
-    while [i =< CS\len][
-        p: matchElem items idx i
-        unless null? p -> return (inclusive)? -> p -> i
-        i: i + 1
+matchScan: function.inline [sItems sIdx sPos sIncl][
+    sI: sPos
+    while [sI =< CS\len][
+        sSz: size CS\log
+        sP: matchOne sItems sIdx sI
+        if sP = NOTSIMPLE -> sP: matchElem sItems sIdx sI
+        unless null? sP -> return (sIncl)? -> sP -> sI
+        if (size CS\log) > sSz [
+            CS\log: (sSz = 0)? -> [] -> slice CS\log 0 sSz - 1
+        ]
+        sI: sI + 1
     ]
     null
 ]
 
-;; a block: ordered alternatives split on the bar symbol,
-;; each alternative a sequence
-matchBlock: function [blk pos][
-    nItems: size blk
-    start: 0
-    i: 0
-    CS\cuts: append CS\cuts false
-    while [i =< nItems][
-        isBar: false
-        if i < nItems [
-            if symbol? blk\[i] [
-                if (to :string blk\[i]) = "|" -> isBar: true
-            ]
+;; a block: ordered alternatives split on the bar symbol, each
+;; alternative a sequence. Splitting and matching are the same walk —
+;; separating them would visit every item twice, once to find the bars
+;; and once to match between them. A bar can only fall on an element
+;; boundary, so stepping by element width finds every one of them.
+;; Nearly every element is one item wide — a literal, a charset, a
+;; rule name — so the width is settled inline and elemSpan is called
+;; only for the keywords that take operands.
+matchBlock: function.inline [bBlk bPos][
+    bN: size bBlk
+    if CS\ncuts < size CS\cuts [ CS\cuts\[CS\ncuts]: false ]
+    unless CS\ncuts < size CS\cuts [ CS\cuts: append CS\cuts false ]
+    CS\ncuts: CS\ncuts + 1
+    bIdx: 0
+    bP: bPos
+    bSz: size CS\log
+    bAlive: true
+    while [bIdx =< bN][
+        bBound: bIdx = bN
+        unless bBound [
+            bIt: bBlk\[bIdx]
+            if symbol? bIt [ bBound: bIt = BAR ]
         ]
-        if or? isBar (i = nItems) [
-            sz: logMark
-            p: matchSeq blk start i pos
-            unless null? p [
-                CS\cuts: chop CS\cuts
-                return p
+        if bBound [
+            if bAlive [
+                CS\ncuts: CS\ncuts - 1
+                return bP
             ]
-            discard logTrim sz
-            if last CS\cuts [
-                CS\cuts: chop CS\cuts
+            ; the alternative that just died was cut, so the choice
+            ; dies with it instead of trying what follows
+            if CS\cuts\[CS\ncuts - 1] [
+                CS\ncuts: CS\ncuts - 1
                 return null
             ]
-            start: i + 1
+            bAlive: true
+            bP: bPos
+            bSz: size CS\log
+            bIdx: bIdx + 1
         ]
-        i: i + 1
+        unless bBound [
+            if bAlive [
+                bP2: matchOne bBlk bIdx bP
+                if bP2 = NOTSIMPLE -> bP2: matchElem bBlk bIdx bP
+                if null? bP2 [
+                    bAlive: false
+                    if (size CS\log) > bSz [
+                        CS\log: (bSz = 0)? -> [] -> slice CS\log 0 bSz - 1
+                    ]
+                ]
+                unless null? bP2 [ bP: bP2 ]
+            ]
+            ; a dead alternative is still walked, to find where it ends
+            bIt: bBlk\[bIdx]
+            bStep: 1
+            if integer? bIt -> bStep: elemSpan bBlk bIdx
+            if word? bIt [
+                if key? KWCODE bIt -> bStep: elemSpan bBlk bIdx
+            ]
+            bIdx: bIdx + bStep
+        ]
     ]
-    CS\cuts: chop CS\cuts
+    CS\ncuts: CS\ncuts - 1
     null
-]
-
-matchSeq: function [items start stop pos][
-    idx: start
-    p: pos
-    while [idx < stop][
-        p2: matchElem items idx p
-        if null? p2 -> return null
-        p: p2
-        idx: idx + elemSpan items idx
-    ]
-    p
 ]
 
 ;; ── grammar pre-pass ─────────────────────────────────────────────────
@@ -598,7 +885,9 @@ matchSeq: function [items start stop pos][
 ;; unbound word is an error here, not a match failure — then compute
 ;; nullability by fixpoint, and reject left recursion — direct or
 ;; indirect, including through nullable prefixes. See Left recursion
-;; in the proposal.
+;; in the proposal. The table it builds is also what the matcher reads
+;; rule names out of, so resolution happens once per scan rather than
+;; once per invocation.
 
 collectRules: function [blk reg][
     if empty? blk -> return true
@@ -611,7 +900,7 @@ collectRules: function [blk reg][
         if word? it [
             w: to :string it
             if in? w ["quote" "do" "fail" "defer"] -> step: 2
-            unless in? w KEYWORDS [
+            unless key? KWCODE w [
                 unless key? reg w [
                     unless set? w -> panic ~"carpintero: unbound rule word '|w|'"
                     reg\[w]: var w
@@ -661,9 +950,7 @@ blockNullable?: function [blk nmap][
     while [i =< nItems][
         isBar: false
         if i < nItems [
-            if symbol? blk\[i] [
-                if (to :string blk\[i]) = "|" -> isBar: true
-            ]
+            if symbol? blk\[i] [ isBar: (blk\[i]) = BAR ]
         ]
         if or? isBar (i = nItems) [
             if seqNullable? blk start i nmap -> result: true
@@ -734,9 +1021,7 @@ blockHeads: function [blk nmap][
     while [i =< nItems][
         isBar: false
         if i < nItems [
-            if symbol? blk\[i] [
-                if (to :string blk\[i]) = "|" -> isBar: true
-            ]
+            if symbol? blk\[i] [ isBar: (blk\[i]) = BAR ]
         ]
         if or? isBar (i = nItems) [
             hs: hs ++ seqHeads blk start i nmap
@@ -777,15 +1062,15 @@ GCACHE: #[]
 checkGrammar: function [rule][
     reg: #[]
     discard collectRules rule reg
-    if empty? keys reg -> return true
+    if empty? keys reg -> return reg
     h: to :string hash @[rule reg]
-    if key? GCACHE h -> return true
+    if key? GCACHE h -> return reg
     nmap: computeNullmap reg
     state: #[]
     loop keys reg 'k [ state\[k]: 0 ]
     loop keys reg 'k [ discard dfsCycle k reg nmap state [] ]
     GCACHE\[h]: true
-    true
+    reg
 ]
 
 ;; ── public API ───────────────────────────────────────────────────────
@@ -800,26 +1085,35 @@ scan: function [input rule][
     pfx: attr 'prefix
     mset: attr 'memo
     MC\rules: []
+    MC\on: false
     unless null? mset [
         unless empty? mset [
             loop mset 'x [ MC\rules: append MC\rules to :string x ]
+            MC\on: true
         ]
     ]
     MC\tab: #[]
-    discard checkGrammar rule
-    CS\inp: input
-    CS\len: size input
-    CS\isblk: block? input
+    CS\reg: checkGrammar rule
+    ; S1: string input becomes a block of characters, once
+    if block? input [
+        CS\isblk: true
+        CS\inp: input
+    ]
+    unless block? input [
+        CS\isblk: false
+        CS\inp: map input 'c -> c
+    ]
+    CS\len: size CS\inp
     CS\log: []
     CS\farpath: []
     CS\exp: []
     CS\coldepth: 0
-    CS\rules: []
-    CS\dsc: []
+    CS\nrules: 0
+    CS\dscw: ""
     CS\ctx: ""
     CS\quiet: 0
     CS\path: []
-    CS\cuts: []
+    CS\ncuts: 0
     p: matchBlock rule 0
     if null? p -> return null
     if and? (null? pfx) (p <> CS\len) -> return null
@@ -832,21 +1126,15 @@ scan: function [input rule][
             ; cap and keep entries carry the input they refer to, since
             ; a capture inside into spans the nested block, not the top
             if kind = "cap" [
-                src: e\4
-                v: (block? src)? -> [] -> ""
-                unless e\2 = e\3 -> v: slice src e\2 e\3 - 1
-                caps\[e\1]: v
+                caps\[e\1]: capValue e\4 e\2 e\3
             ]
             if kind = "copen" [
                 cnames: append cnames e\1
                 citems: append citems @[[]]
             ]
             if kind = "keep" [
-                src: e\4
-                v: (block? src)? -> [] -> ""
-                unless e\2 = e\3 -> v: slice src e\2 e\3 - 1
                 top: (size citems) - 1
-                citems\[top]: append citems\[top] @[v]
+                citems\[top]: append citems\[top] @[capValue e\4 e\2 e\3]
             ]
             if kind = "cclose" [
                 top: (size citems) - 1
@@ -862,6 +1150,15 @@ scan: function [input rule][
         ]
     ]
     (null? pfx)? -> caps -> #[reached: p  captures: caps]
+]
+
+;; materialize one logged span. Block input yields a block; string
+;; input yields the characters joined back into a string, since that
+;; is the representation the caller handed in — see S1.
+capValue: function.inline [cvSrc cvFrom cvTo][
+    if cvFrom = cvTo -> return (CS\isblk)? -> [] -> ""
+    cvSl: slice cvSrc cvFrom cvTo - 1
+    (CS\isblk)? -> cvSl -> join cvSl
 ]
 
 ;; human-readable report for the most recent failed scan, built from
@@ -895,7 +1192,7 @@ scanError: function [][
     while [and? [ls > 0] [(CS\inp\[ls - 1]) <> nl]][ ls: ls - 1 ]
     le: f
     while [and? [le < CS\len] [(CS\inp\[le]) <> nl]][ le: le + 1 ]
-    excerpt: (ls = le)? -> "" -> slice CS\inp ls le - 1
+    excerpt: (ls = le)? -> "" -> join slice CS\inp ls le - 1
     pad: (col > 1)? -> repeat " " col - 1 -> ""
     join.with: to :string nl @[
         ~"scan failed at line |line|, column |col| — expected: |exp||ctxs|"

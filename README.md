@@ -102,11 +102,18 @@ worth knowing, all deliberate (the design rationale lives in
 Draft implementation of the proposal's Phase 0–2 scope, pure Arturo,
 verified against Arturo 0.10.0. This includes the interpreted half of
 Phase 3 — `cut`, `defer`, opt-in memoization, benchmarks — with only
-the compiled Nim core left to propose upstream. `demo.art` is the test
-suite (71 checks):
+the compiled Nim core left to propose upstream.
+
+`demo.art` is the readable tour (71 checks); `tests.art` is the
+regression suite (353 checks, nonzero exit on failure). Grammar errors
+have to panic to be tested, and a panic unwound through `try` leaves
+the abandoned frames' values behind for the next statements to misread,
+so each of those cases runs in its own interpreter through
+`tests-panics.art`.
 
 ```
 arturo demo.art
+arturo tests.art
 ```
 
 `examples/` holds the proposal's three demos, each runnable on its own:
@@ -115,8 +122,10 @@ JSON in fifteen rules (`json.art`), RFC 4180 CSV in a dozen
 every function definition from `carpintero.art` itself
 (`arturo-scan.art`). `bench.art` is the Phase 3 benchmark: it shows
 scan losing to the native regex engine by the expected orders of
-magnitude, and memoization collapsing a deliberately exponential
-grammar from seconds to milliseconds.
+magnitude, memoization collapsing a deliberately exponential grammar
+from a sixth of a second to a millisecond and a half, and — the figure
+worth watching over time — a cost per kilobyte that stays flat as the
+input doubles.
 
 `bugs/` contains minimal repros for three Arturo 0.10.0 interpreter bugs
 found while building this, with workarounds documented in `carpintero.art`.

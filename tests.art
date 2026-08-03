@@ -1,0 +1,749 @@
+;; tests.art — the full regression suite for carpintero.art.
+;;
+;; demo.art is the readable tour; this file is the net. Every semantic
+;; the manual promises gets a case here, plus the edges the tour skips:
+;; empty inputs, zero counts, nested negation, rollback through every
+;; construct that logs, panics, and the grammars from examples run over
+;; inputs that should and should not match.
+;;
+;; Run: arturo tests.art   Exit status is nonzero if anything failed.
+
+import ./"carpintero.art"!
+
+;; TRACE prints each section as it starts, which is how you find the
+;; case that aborts the run rather than merely failing it
+TRACE: in? "trace" arg
+
+R: #[pass: 0  fail: 0  notes: []  section: ""]
+
+section: function [name][
+    R\section: name
+    if TRACE -> print ["-- section" name]
+    true
+]
+
+t: function [label got expected][
+    if TRACE -> print ["   ." label]
+    if got = expected [ R\pass: R\pass + 1 ]
+    unless got = expected [
+        R\fail: R\fail + 1
+        R\notes: append R\notes ~"|R\section| / |label|: got |got|, wanted |expected|"
+    ]
+    true
+]
+
+;; grammar errors panic, and a panic unwound through try leaves the
+;; abandoned matcher frames worth of values on the stack for the next
+;; statements to misread as arguments. So each panic case runs in its
+;; own interpreter, through tests-panics.art, and counts as passed when
+;; that run started and did not reach the end.
+PANICS: "tests-panics.art"
+
+panicCase: function [name][
+    out: execute ~"arturo |PANICS| |name| 2>/dev/null"
+    and? (in? "START" out) (not? in? "SURVIVED" out)
+]
+
+;; ── charsets ─────────────────────────────────────────────────────────
+discard section "charsets"
+
+digit:   charset "0-9"
+alpha:   charset "a-zA-Z"
+lower:   charset "a-z"
+upper:   charset "A-Z"
+vowel:   charset "aeiou"
+dashy:   charset "a-z\-"
+solo:    charset "x"
+emptycs: charset ""
+
+discard t "digit accepts" scan? "0123456789" [some digit] true
+discard t "digit rejects letter" scan? "a" [digit] false
+discard t "alpha spans two ranges" scan? "aZmQ" [some alpha] true
+discard t "alpha rejects digit" scan? "a1" [some alpha] false
+discard t "lower rejects upper" scan? "A" [lower] false
+discard t "upper rejects lower" scan? "a" [upper] false
+discard t "explicit set" scan? "aeiou" [some vowel] true
+discard t "explicit set rejects" scan? "b" [vowel] false
+discard t "escaped dash is literal" scan? "a-b" [some dashy] true
+discard t "single char set" scan? "xxx" [some solo] true
+discard t "single char set rejects" scan? "y" [solo] false
+discard t "empty charset matches nothing" scan? "a" [emptycs] false
+discard t "empty charset in any is fine" scan? "" [any emptycs] true
+discard t "charset boundary low" scan? "0" [digit] true
+discard t "charset boundary high" scan? "9" [digit] true
+discard t "charset below boundary" scan? "/" [digit] false
+discard t "charset above boundary" scan? ":" [digit] false
+
+;; composition
+hexd:      csUnion digit charset "a-fA-F"
+consonant: csIntersect lower csComplement vowel
+notdigit:  csComplement digit
+both:      csIntersect digit alpha
+selfint:   csIntersect digit digit
+uempty:    csUnion emptycs digit
+
+discard t "csUnion accepts left" scan? "7" [hexd] true
+discard t "csUnion accepts right" scan? "F" [hexd] true
+discard t "csUnion rejects outside" scan? "g" [hexd] false
+discard t "csIntersect narrows" scan? "bcdfg" [some consonant] true
+discard t "csIntersect excludes" scan? "a" [consonant] false
+discard t "csComplement accepts other" scan? "a" [notdigit] true
+discard t "csComplement rejects member" scan? "5" [notdigit] false
+discard t "disjoint intersect is empty" scan? "5" [both] false
+discard t "self intersect is identity" scan? "5" [selfint] true
+discard t "union with empty is identity" scan? "5" [uempty] true
+;; composition happens in the host, not in the rule: a rule block is
+;; data, so its words are looked up, never called
+dbl:  csComplement csComplement digit
+anyc: csComplement emptycs
+discard t "double complement round trip" scan? "5" [dbl] true
+discard t "double complement rejects" scan? "a" [dbl] false
+discard t "complement of empty is everything" scan? "aZ9 " [some anyc] true
+discard t "charsets match a newline" scan? (to :string to :char 10) [anyc] true
+
+;; ── string and char terminals ────────────────────────────────────────
+discard section "terminals"
+
+qc: to :char 113
+
+discard t "string literal" scan? "hello" ["hello"] true
+discard t "string literal rejects" scan? "hellp" ["hello"] false
+discard t "string literal is case sensitive" scan? "Hello" ["hello"] false
+discard t "empty string matches empty" scan? "" [""] true
+discard t "empty string consumes nothing" scan? "a" ["" "a"] true
+discard t "empty rule block matches empty" scan? "" [] true
+discard t "empty rule rejects nonempty" scan? "a" [] false
+discard t "string longer than input" scan? "he" ["hello"] false
+discard t "char literal" scan? "q" [qc] true
+discard t "char literal rejects" scan? "p" [qc] false
+discard t "char at end of input" scan? "" [qc] false
+discard t "sequence of literals" scan? "abc" ["a" "b" "c"] true
+discard t "sequence order matters" scan? "acb" ["a" "b" "c"] false
+discard t "nested block groups" scan? "abc" [["a" "b"] "c"] true
+discard t "deeply nested block groups" scan? "abc" [[[["a"]] ["b" ["c"]]]] true
+discard t "whole input must match" scan? "abcd" ["abc"] false
+discard t "unicode is characters not bytes" scan? "héllo" ["héllo"] true
+discard t "unicode char count" scan? "héllo" [5 skip] true
+
+;; ── alternation ──────────────────────────────────────────────────────
+discard section "alternation"
+
+discard t "first arm wins" scan? "a" ["a" | "b"] true
+discard t "second arm tried" scan? "b" ["a" | "b"] true
+discard t "no arm matches" scan? "c" ["a" | "b"] false
+discard t "three arms" scan? "c" ["a" | "b" | "c"] true
+discard t "ordered choice is not longest" scan? "ab" ["a" | "ab"] false
+discard t "reorder fixes it" scan? "ab" ["ab" | "a"] true
+discard t "empty arm matches" scan? "" ["a" |] true
+discard t "leading empty arm shadows" scan? "a" [| "a"] false
+discard t "alternation inside sequence" scan? "axc" ["a" ["x" | "y"] "c"] true
+discard t "alternation inside sequence, other arm" scan? "ayc" ["a" ["x" | "y"] "c"] true
+discard t "backtracks out of a failed arm" scan? "ab" [["a" "c"] | ["a" "b"]] true
+discard t "nested alternation" scan? "d" [["a" | "b"] | ["c" | "d"]] true
+
+;; ── quantifiers ──────────────────────────────────────────────────────
+discard section "quantifiers"
+
+discard t "some one" scan? "a" [some "a"] true
+discard t "some many" scan? "aaaaa" [some "a"] true
+discard t "some needs one" scan? "" [some "a"] false
+discard t "any zero" scan? "" [any "a"] true
+discard t "any many" scan? "aaa" [any "a"] true
+discard t "opt present" scan? "a" [opt "a"] true
+discard t "opt absent" scan? "" [opt "a"] true
+discard t "opt does not backtrack" scan? "ab" [opt "ab" "b"] false
+discard t "exact count" scan? "aaa" [3 "a"] true
+discard t "exact count too few" scan? "aa" [3 "a"] false
+discard t "exact count too many" scan? "aaaa" [3 "a"] false
+discard t "count of zero" scan? "" [0 "a"] true
+discard t "count of zero consumes nothing" scan? "a" [0 "a" "a"] true
+discard t "count of one" scan? "a" [1 "a"] true
+discard t "count over a group" scan? "ababab" [3 ["a" "b"]] true
+discard t "count over a charset" scan? "42" [2 digit] true
+discard t "between lower bound" scan? "aa" [between 2 4 "a"] true
+discard t "between upper bound" scan? "aaaa" [between 2 4 "a"] true
+discard t "between below" scan? "a" [between 2 4 "a"] false
+discard t "between above" scan? "aaaaa" [between 2 4 "a"] false
+discard t "between zero lower" scan? "" [between 0 3 "a"] true
+discard t "between equal bounds" scan? "aa" [between 2 2 "a"] true
+discard t "some of a group" scan? "ababab" [some ["a" "b"]] true
+discard t "any of an alternation" scan? "abba" [any ["a" | "b"]] true
+discard t "nested quantifiers" scan? "aabaab" [some [some "a" "b"]] true
+discard t "some is greedy and does not give back" scan? "aaa" [some "a" "a"] false
+discard t "any is greedy and does not give back" scan? "aaa" [any "a" "a"] false
+
+;; the progress guard: a nullable body must not spin forever
+discard t "progress guard on any" scan? "xy" [any [opt "a"] "xy"] true
+discard t "progress guard on some" scan? "xy" [some [opt "a"] "xy"] true
+discard t "progress guard on empty string body" scan? "z" [any "" "z"] true
+discard t "progress guard on between" scan? "z" [between 0 9 [opt "a"] "z"] true
+
+;; ── to, thru, skip, end ──────────────────────────────────────────────
+discard section "advance"
+
+discard t "skip one" scan? "a" [skip] true
+discard t "skip at end fails" scan? "" [skip] false
+discard t "skip counted" scan? "abc" [3 skip] true
+discard t "some skip eats all" scan? "abcd" [some skip] true
+discard t "end at end" scan? "" [end] true
+discard t "end after consuming" scan? "ab" ["ab" end] true
+discard t "end before the end fails" scan? "ab" ["a" end] false
+discard t "to stops before" scan? "abc=x" [to "=" "=x"] true
+discard t "thru includes" scan? "abc=x" [thru "=" "x"] true
+discard t "to at position zero" scan? "=x" [to "=" "=x"] true
+discard t "to a missing target fails" scan? "abc" [to "="] false
+discard t "to end of input" scan? "abc" [to end] true
+discard t "thru end of input" scan? "abc" [thru end] true
+discard t "to a charset" scan? "abc9" [to digit digit] true
+discard t "thru a group" scan? "xxabyy" [thru ["a" "b"] "yy"] true
+discard t "to finds the first occurrence" scan? "a=b=c" [to "=" "=b=c"] true
+
+;; ── lookahead ────────────────────────────────────────────────────────
+discard section "lookahead"
+
+discard t "ahead does not consume" scan? "ab" [ahead "a" "ab"] true
+discard t "ahead fails the sequence" scan? "ab" [ahead "b" "ab"] false
+discard t "ahead of a group" scan? "abc" [ahead ["a" "b"] "abc"] true
+discard t "not negates" scan? "ba" [not "a" skip skip] true
+discard t "not fails on a match" scan? "ab" [not "a" skip skip] false
+discard t "not at end of input succeeds" scan? "" [not "a"] true
+discard t "not end means more input" scan? "a" [not end skip] true
+discard t "double negation is a lookahead" scan? "ab" [not not "a" "ab"] true
+discard t "not of an alternation" scan? "c" [not ["a" | "b"] skip] true
+discard t "not of an alternation rejects" scan? "b" [not ["a" | "b"] skip] false
+discard t "ahead consumes nothing before end" scan? "" [ahead end end] true
+discard t "not inside a loop" scan? "abc" [some [not "c" skip] "c"] true
+
+;; ── captures ─────────────────────────────────────────────────────────
+discard section "captures"
+
+c1: scan "abc" [capture 'all [some skip]]
+discard t "capture whole input" c1\all "abc"
+c2: scan "key=value" [capture 'k to "=" "=" capture 'v [some skip]]
+discard t "two captures, first" c2\k "key"
+discard t "two captures, second" c2\v "value"
+c3: scan "ab" [capture 'outer [capture 'inner "a" "b"]]
+discard t "nested capture outer" c3\outer "ab"
+discard t "nested capture inner" c3\inner "a"
+c4: scan "aaab" [some [capture 'c skip]]
+discard t "repeated capture keeps the last" c4\c "b"
+c5: scan "" [capture 'e []]
+discard t "empty capture is an empty string" c5\e ""
+c6: scan "abc" [capture 'x "ab" "!" | capture 'y "abc"]
+discard t "dead capture rolled back" key? c6 "x" false
+discard t "live capture kept" c6\y "abc"
+c7: scan "xy" [capture 'a "x" capture 'b "y"]
+discard t "capture count" size keys c7 2
+c8: scan "abab" [any [capture 'p "ab"]]
+discard t "capture under any" c8\p "ab"
+c9: scan "ab" [[capture 'q "a" "z"] | [capture 'q "a" "b"]]
+discard t "rollback then recapture" c9\q "a"
+discard t "capture on a failed scan is null" scan "zz" [capture 'n "a"] null
+c10: scan "abc" [capture 'i [3 skip]]
+discard t "capture over a counted group" c10\i "abc"
+c11: scan "abc" [not "z" capture 'j [some skip]]
+discard t "capture after a lookahead" c11\j "abc"
+
+;; captures roll back out of a lookahead operand
+c12: scan "ab" [ahead [capture 'la "a"] "ab"]
+discard t "capture inside ahead survives" c12\la "a"
+c13: scan "ab" [not [capture 'nn "z"] "ab"]
+discard t "capture inside not is gone" key? c13 "nn" false
+
+;; ── collect and keep ─────────────────────────────────────────────────
+discard section "collect"
+
+k1: scan "one, two, three" [collect 'w [some [keep [some lower] | skip]]]
+discard t "collect size" size k1\w 3
+discard t "collect first" first k1\w "one"
+discard t "collect last" last k1\w "three"
+k2: scan "" [collect 'e [any keep "a"]]
+discard t "empty collect is an empty block" k2\e []
+k3: scan "abc" [collect 'xs [keep "ab" "!"] | thru end]
+discard t "collect rolled back" key? k3 "xs" false
+k4: scan "aabb" [collect 'g [some keep "a" some keep "b"]]
+discard t "collect mixed keeps" size k4\g 4
+k5: scan "ab" [collect 'o [keep "a" collect 'i [keep "b"]]]
+discard t "nested collect outer" size k5\o 1
+discard t "nested collect inner" size k5\i 1
+discard t "nested collect outer content" first k5\o "a"
+discard t "nested collect inner content" first k5\i "b"
+k6: scan "abab" [collect 'r [some [keep "ab"]]]
+discard t "collect under some" size k6\r 2
+k7: scan "ab" [collect 'p [keep [some skip]]]
+discard t "keep of a group" first k7\p "ab"
+k8: scan "aXbXc" [collect 'f [keep [any not "X" skip] any ["X" keep [any not "X" skip]]]]
+discard t "collect splits on a separator" size k8\f 3
+
+;; a keep inside a dead alternative disappears with it
+k9: scan "ab" [collect 'z [[keep "a" "z"] | [keep "a" "b"]]]
+discard t "keep rollback inside collect" size k9\z 1
+
+;; ── host escapes ─────────────────────────────────────────────────────
+discard section "escapes"
+
+E: #[n: 0  order: []]
+bump: function [x][ E\n: E\n + x  x ]
+note: function [x][ E\order: append E\order x  x ]
+
+E\n: 0
+discard scan "aab" [some [do [bump 1] "a"] "b"]
+discard t "do runs once per attempt" E\n 3
+
+E\n: 0
+discard scan "ab" ["a" do [E\n: 5] "b"]
+discard t "do may assign" E\n 5
+
+E\n: 0
+discard scan "ab" ["a" defer [bump 1] "b"]
+discard t "defer runs on commit" E\n 1
+
+E\n: 0
+discard scan "ax" ["a" defer [bump 1] "b"]
+discard t "defer skipped on failure" E\n 0
+
+E\n: 0
+discard scan "abab" [["ab" defer [bump 1] "x"] | "abab"]
+discard t "defer dies with its branch" E\n 0
+
+E\order: []
+discard scan "abc" ["a" defer [note 1] "b" defer [note 2] "c" defer [note 3]]
+discard t "defers run in match order" E\order [1 2 3]
+
+E\n: 0
+discard scan "aaa" [some ["a" defer [bump 1]]]
+discard t "defer once per surviving iteration" E\n 3
+
+E\n: 0
+discard scan "ab" ["a" defer [E\n: 9] "b"]
+discard t "defer may assign" E\n 9
+
+E\n: 0
+discard scan "ab" [not ["a" do [bump 1] "z"] "ab"]
+discard t "do inside not still runs" E\n 1
+
+E\n: 0
+discard scan "ab" [not ["a" defer [bump 1] "z"] "ab"]
+discard t "defer inside not is discarded" E\n 0
+
+discard t "unreached fail does not panic" scan? "b" ["a" fail "nope" | "b"] true
+
+;; ── cut ──────────────────────────────────────────────────────────────
+discard section "cut"
+
+discard t "cut commits the choice" scan? "ab" ["a" cut "x" | "ab"] false
+discard t "without cut the next arm runs" scan? "ab" ["a" "x" | "ab"] true
+discard t "cut is local to its block" scan? "ab" [["a" cut "x" | "z"] | "ab"] true
+discard t "cut before a success is harmless" scan? "ab" ["a" cut "b" | "zz"] true
+discard t "cut in the last arm" scan? "ab" ["z" | "a" cut "x"] false
+discard t "cut consumes nothing" scan? "ab" [cut "ab"] true
+discard t "cut inside a loop arm" scan? "ab" [some ["a" cut "b" | skip]] true
+
+;; ── memoization ──────────────────────────────────────────────────────
+discard section "memo"
+
+M: #[n: 0]
+mrule: [do [M\n: M\n + 1] capture 'm "ab"]
+mplain: ["ab"]
+
+M\n: 0
+m1: scan.memo: ['mrule] "abab" [mrule "x" | mrule "ab"]
+discard t "memo replays captures" m1\m "ab"
+discard t "memo hit skips the escape" M\n 1
+
+M\n: 0
+discard scan "abab" [mrule "x" | mrule "ab"]
+discard t "without memo the escape reruns" M\n 2
+
+discard t "memo of an unused rule is harmless" scan?.memo: ['mplain] "ab" [mplain] true
+discard t "memo does not change acceptance" (null? scan.memo: ['mplain] "ac" [mplain]) true
+m2: scan.memo: ['mrule] "ab" [mrule]
+discard t "memo with a single use" m2\m "ab"
+discard t "memo of a failing rule" (null? scan.memo: ['mplain] "zz" [mplain | mplain]) true
+
+;; memoized and plain runs must agree on a mutually recursive grammar
+memexpr: [memterm "+" memexpr | memterm]
+memterm: [some digit]
+discard t "memo agrees on accept" (scan? "1+2+3" memexpr) = (not? null? scan.memo: ['memexpr 'memterm] "1+2+3" memexpr) true
+discard t "memo agrees on reject" (scan? "1++2" memexpr) = (not? null? scan.memo: ['memexpr 'memterm] "1++2" memexpr) true
+
+;; ── prefix mode ──────────────────────────────────────────────────────
+discard section "prefix"
+
+p1: scan.prefix "2026-08-03 rest" [4 digit "-" 2 digit "-" 2 digit]
+discard t "prefix reached" p1\reached 10
+p2: scan.prefix "abc" ["a"]
+discard t "prefix short reach" p2\reached 1
+p3: scan.prefix "abc" [capture 'h "ab"]
+discard t "prefix carries captures" p3\captures\h "ab"
+discard t "prefix still needs a match" (null? scan.prefix "zzz" ["a"]) true
+p4: scan.prefix "abc" [some skip]
+discard t "prefix may reach the end" p4\reached 3
+p5: scan.prefix "abc" []
+discard t "prefix may reach nothing" p5\reached 0
+
+;; ── block input ──────────────────────────────────────────────────────
+discard section "blocks"
+
+discard t "type terminals" scan? [42 "hi"] [:integer :string] true
+discard t "type mismatch" scan? [42 42] [:integer :string] false
+discard t "type block" scan? [[1 2]] [:block] true
+discard t "type floating" scan? [1.5] [:floating] true
+;; true is a word inside an unevaluated block, so the logical value has
+;; to be built with an evaluating block
+discard t "type logical" scan? @[true] [:logical] true
+discard t "true is a word when unevaluated" scan? [true] ['true] true
+discard t "literal word terminal" scan? [function] ['function] true
+discard t "literal word mismatch" scan? [func] ['function] false
+discard t "quote escapes a keyword" scan? [some 5] [quote some quote 5] true
+discard t "quote matches a value" scan? [42] [quote 42] true
+discard t "quote mismatch" scan? [41] [quote 42] false
+discard t "string element in a block" scan? ["ab" "cd"] ["ab" skip] true
+discard t "string element mismatch" scan? ["ab"] ["cd"] false
+discard t "charset over block chars" scan? [`a`] [digit] false
+discard t "skip over a block" scan? [1 2 3] [3 skip] true
+discard t "end of a block" scan? [1] [:integer end] true
+discard t "empty block input" scan? [] [] true
+discard t "empty block rejects a terminal" scan? [] [:integer] false
+discard t "any over a block" scan? [1 2 3] [any :integer] true
+discard t "alternation over a block" scan? [1 "a" 2] [some [:integer | :string]] true
+discard t "to over a block" scan? [1 2 "x"] [to :string :string] true
+
+bcap: scan [1 "a"] [capture 'i :integer capture 's :string]
+discard t "block capture is a block" bcap\i [1]
+discard t "block capture second" bcap\s ["a"]
+
+bcol: scan [1 2 3] [collect 'ns [some keep :integer]]
+discard t "block collect size" size bcol\ns 3
+discard t "block collect content" first bcol\ns [1]
+
+
+code: [
+    greet: function [name][ print name ]
+    x: 10
+    add: function [a b][ a + b ]
+]
+funcdef: [capture 'name :label 'function capture 'params :block capture 'body :block]
+bf: scan code [any [funcdef | skip]]
+discard t "funcdef name" (to :string first bf\name) "add"
+discard t "funcdef params" (first bf\params) [a b]
+discard t "funcdef rejects data" scan? [1 2 3] funcdef false
+
+bfc: scan code [collect 'defs [any [keep funcdef | skip]]]
+discard t "collect every funcdef" size bfc\defs 2
+
+;; ── into ─────────────────────────────────────────────────────────────
+discard section "into"
+
+pair: [:integer :string]
+discard t "into descends" scan? [[1 "a"] [2 "b"]] [some into pair] true
+discard t "into wants the whole nested block" scan? [[1 "a" "x"]] [into pair] false
+discard t "into rejects a non-block" scan? [42] [into pair] false
+discard t "into at the end of input" scan? [] [into pair] false
+discard t "into an empty nested block" scan? [[]] [into []] true
+discard t "into two levels" scan? [[[1]]] [into [into [:integer]]] true
+discard t "into three levels" scan? [[[[1]]]] [into [into [into [:integer]]]] true
+i1: scan [[1 "one"] [2 "two"]] [some into [:integer capture 'w :string]]
+discard t "into capture last wins" (first i1\w) "two"
+i2: scan [[1 2] [3 4]] [collect 'all [some into [some keep :integer]]]
+discard t "into collect gathers across blocks" size i2\all 4
+discard t "into then more" scan? [[1] 2] [into [:integer] :integer] true
+discard t "into backtracks" scan? [[1]] [into [:string] | into [:integer]] true
+
+;; ── error reporting ──────────────────────────────────────────────────
+discard section "errors"
+
+date: [capture 'year [4 digit] "-" capture 'month [2 digit] "-" capture 'day [2 digit]]
+discard scan "2026-08-0x" date
+e1: scanError
+discard t "error line and column" (in? "line 1, column 10" e1) true
+discard t "error names the rule" (in? "expected: digit" e1) true
+discard t "error gives context" (in? "while matching: day" e1) true
+discard t "error draws a caret" (in? "^" e1) true
+
+nlch: to :string to :char 10
+discard scan (join @["abc" nlch "de!"]) [any [lower | nlch]]
+e2: scanError
+discard t "error counts lines" (in? "line 2" e2) true
+discard t "error counts columns" (in? "column 3" e2) true
+
+discard scan [1 2 "x"] [some :integer]
+e3: scanError
+discard t "block error gives an index" (in? "index 2" e3) true
+
+discard scan [[1 "a"] [2 3]] [some into [:integer :string]]
+e4: scanError
+discard t "into error gives a path" (in? "index path 1 1" e4) true
+
+discard scan "ab" ["a" "c"]
+e5: scanError
+discard t "error reports the literal" (in? "literal c" e5) true
+
+discard scan "" [some digit]
+e6: scanError
+discard t "error at position zero" (in? "column 1" e6) true
+
+discard scan "ab" ["ab" "c"]
+e7: scanError
+discard t "error past the end" (in? "column 3" e7) true
+
+discard scan "abc" [some lower end "x"]
+e8: scanError
+discard t "farthest failure wins" (in? "column 4" e8) true
+
+;; alternatives at the same position accumulate in the expected list
+discard scan "c" ["a" | "b"]
+e9: scanError
+discard t "expected lists both arms" (in? "literal a" e9) true
+discard t "expected lists the second arm" (in? "literal b" e9) true
+
+;; ── grammar errors ───────────────────────────────────────────────────
+discard section "grammar errors"
+
+rr: ["a" rr | "z"]
+discard t "right recursion is fine" scan? "aaz" rr true
+mr: ["(" any mr ")"]
+discard t "middle recursion is fine" scan? "(()(()))" [some mr] true
+
+;; every case that must panic, each in its own interpreter
+discard t "inverted charset range"         panicCase "inverted-range"  true
+discard t "rule word bound to a function"  panicCase "func-word"       true
+discard t "capture needs a literal name"   panicCase "capture-name"    true
+discard t "keep outside collect"           panicCase "keep-outside"    true
+discard t "collect needs a literal name"   panicCase "collect-name"    true
+discard t "do needs a block"               panicCase "do-block"        true
+discard t "defer needs a block"            panicCase "defer-block"     true
+discard t "fail panics"                    panicCase "fail"            true
+discard t "type terminal needs a block"    panicCase "type-on-string"  true
+discard t "word terminal needs a block"    panicCase "word-on-string"  true
+discard t "quote needs a block"            panicCase "quote-on-string" true
+discard t "into needs a block"             panicCase "into-on-string"  true
+discard t "unbound rule word"              panicCase "unbound"         true
+discard t "direct left recursion"          panicCase "left-direct"     true
+discard t "indirect left recursion"        panicCase "left-indirect"   true
+discard t "left recursion via a nullable"  panicCase "left-nullable"   true
+discard t "between needs integer bounds"   panicCase "between-bounds"  true
+
+;; ── real grammars ────────────────────────────────────────────────────
+discard section "grammars"
+
+jtab: to :char 9
+jnl:  to :char 10
+jcr:  to :char 13
+jdq:  to :char 34
+jbs:  to :char 92
+digit19: charset "1-9"
+
+jws:      [any [" " | jtab | jnl | jcr]]
+jesc:     [jbs skip]
+jstring:  [jdq any [jesc | not jdq skip] jdq]
+jexpon:   [["e" | "E"] opt ["+" | "-"] some digit]
+jnumber:  [opt "-" ["0" | digit19 any digit] opt ["." some digit] opt jexpon]
+jvalue:   [jws [jstring | jnumber | jobject | jarray | "true" | "false" | "null"] jws]
+jarray:   ["[" jws opt [jvalue any ["," jvalue]] "]"]
+jpair:    [jws jstring jws ":" jvalue]
+jobject:  ["{" jws opt [jpair any ["," jpair]] "}"]
+
+discard t "json object" scan? {{"a": 1}} jvalue true
+discard t "json nested" scan? {{"a": [1, 2.5, {"b": null}]}} jvalue true
+discard t "json empty containers" scan? {{"a": [], "b": {}}} jvalue true
+discard t "json escapes" scan? {"a \"quoted\" word"} jvalue true
+discard t "json exponent" scan? "2.5e-3" jvalue true
+discard t "json negative" scan? "-17" jvalue true
+discard t "json literals" scan? "[true, false, null]" jvalue true
+discard t "json leading zero rejected" scan? "01" jvalue false
+discard t "json truncated rejected" scan? "[1, [2, 3], 4" jvalue false
+discard t "json bare word rejected" scan? "nul" jvalue false
+discard t "json trailing comma rejected" scan? "[1,]" jvalue false
+discard t "json unclosed string rejected" scan? {"abc} jvalue false
+discard t "json deep nesting" scan? "[[[[[[1]]]]]]" jvalue true
+discard t "json whitespace everywhere" scan? {  {  "a"  :  [ 1 , 2 ]  }  } jvalue true
+
+cnl: to :char 10
+ccr: to :char 13
+cdq: to :char 34
+cnewline: [opt ccr cnl]
+cescq:    [cdq cdq]
+cquoted:  [cdq any [cescq | not cdq skip] cdq]
+cbare:    [any [not ["," | cdq | cnewline] skip]]
+cfield:   [cquoted | cbare]
+crecord:  [cfield any ["," cfield]]
+csvrule:  [crecord any [cnewline crecord] opt cnewline]
+
+csvdoc: join.with: (to :string cnl) [
+    {name,role,notes}
+    {ada,architect,"loves ""blocks"", dislikes commas"}
+    {grace,admiral,}
+]
+discard t "csv accepts" scan? csvdoc csvrule true
+discard t "csv lone quote rejected" scan? {a,"b} csvrule false
+discard t "csv single field" scan? "a" csvrule true
+discard t "csv empty fields" scan? ",," csvrule true
+discard t "csv trailing newline" scan? (join @["a,b" (to :string cnl)]) csvrule true
+csvrow: scan {ada,architect,"loves ""blocks"""} [collect 'fields [keep cfield any ["," keep cfield]]]
+discard t "csv field extraction" size csvrow\fields 3
+discard t "csv quoted field content" (last csvrow\fields) {"loves ""blocks"""}
+
+;; an arithmetic grammar, right recursive so it stays a PEG
+aterm:   [some digit | "(" aexpr ")"]
+afactor: [aterm ["*" | "/"] afactor | aterm]
+aexpr:   [afactor ["+" | "-"] aexpr | afactor]
+discard t "arith simple" scan? "1+2" aexpr true
+discard t "arith precedence shape" scan? "1+2*3" aexpr true
+discard t "arith parens" scan? "(1+2)*3" aexpr true
+discard t "arith nested parens" scan? "((1))" aexpr true
+discard t "arith rejects trailing operator" scan? "1+" aexpr false
+discard t "arith rejects unbalanced" scan? "(1" aexpr false
+discard t "arith long chain" scan? "1+2+3+4+5+6+7+8+9" aexpr true
+
+;; an identifier and keyword lexer shape
+idstart: csUnion alpha charset "_"
+idcont:  csUnion idstart digit
+ident:   [idstart any idcont]
+discard t "ident simple" scan? "foo" ident true
+discard t "ident with digits" scan? "foo42" ident true
+discard t "ident underscore" scan? "_x" ident true
+discard t "ident cannot start with a digit" scan? "4x" ident false
+discard t "ident rejects a dash" scan? "a-b" ident false
+
+;; a date validator with capture and semantic check through defer
+D: #[y: ""]
+datecap: [capture 'y [4 digit] "-" capture 'm [2 digit] "-" capture 'd [2 digit]]
+dr: scan "1999-12-31" datecap
+discard t "date year" dr\y "1999"
+discard t "date month" dr\m "12"
+discard t "date day" dr\d "31"
+discard t "date rejects short month" scan? "1999-1-31" datecap false
+discard t "date rejects letters" scan? "199x-12-31" datecap false
+
+;; ── comment stripping ────────────────────────────────────────────────
+discard section "source loading"
+
+snl: to :string to :char 10
+sbs: to :string to :char 92
+hostile: join @[";" " bad " sbs "- comment" snl "hx: 42" snl "hx"]
+cleaned: stripComments hostile
+discard t "stripComments removes the bomb" (in? sbs cleaned) false
+discard t "stripped source runs" (do to :block cleaned) 42
+guarded: join @["hy: " {"} "semi ; inside" {"} snl "hy"]
+discard t "semicolon in a string survives" (do to :block stripComments guarded) "semi ; inside"
+discard t "stripComments keeps line count" (size split.lines stripComments hostile) (size split.lines hostile)
+discard t "stripComments on comment free source" (stripComments "a: 1") "a: 1"
+discard t "stripComments on an empty string" (stripComments "") ""
+curlysrc: join @["cz: " "{" "a ; b" "}" snl "cz"]
+discard t "semicolon in a curly string survives" (do to :block stripComments curlysrc) "a ; b"
+charsrc: join @["ch: " "'" ";" "'" snl "ch"]
+discard t "semicolon as a char literal survives" (to :string do to :block stripComments charsrc) ";"
+
+;; ── stress ───────────────────────────────────────────────────────────
+discard section "stress"
+
+longa: repeat "a" 2000
+discard t "long input under some" scan? longa [some "a"] true
+discard t "long input under a charset" scan? longa [some lower] true
+discard t "long input with a trailing miss" scan? (join @[longa "!"]) [some lower] false
+deep: join @[(repeat "(" 60) (repeat ")" 60)]
+discard t "deep recursion" scan? deep mr true
+manydates: join.with: "," map 1..50 'i -> "2026-08-03"
+dateonly: [4 digit "-" 2 digit "-" 2 digit]
+discard t "many dates" scan? manydates [dateonly any ["," dateonly]] true
+discard t "many dates with one bad" scan? (join @[manydates ",2026-08-0x"]) [dateonly any ["," dateonly]] false
+bigblk: map 1..500 'i -> i
+discard t "long block input" scan? bigblk [some :integer] true
+nested3: [[1 [2 [3]]]]
+discard t "nested block descent" scan? nested3 [into [:integer into [:integer into [:integer]]]] true
+
+;; ── nesting ──────────────────────────────────────────────────────────
+;; The matcher runs most of itself inline, in its caller scope, which
+;; is sound only because no two live instances of the same inline
+;; function ever share one. These cases are the interleavings that
+;; would break first if that ever stopped holding: a rule whose value
+;; is a block reached through a terminal position, a keyword applied
+;; to a keyword, a group inside a repetition inside an alternative,
+;; and the same shapes again under lookahead, descent and memoization.
+discard section "nesting"
+
+grp:   [["a" "b"] | ["a" "c"]]
+grp2:  [some grp]
+grp3:  [grp2 "!" | grp2 "?"]
+discard t "rule of rule of group" scan? "abac!" grp3 true
+discard t "rule of rule of group, second arm" scan? "abac?" grp3 true
+discard t "rule of rule of group rejects" scan? "abad!" grp3 false
+
+discard t "keyword on keyword" scan? "aaa" [some some "a"] true
+discard t "any of any" scan? "aaa" [any any "a"] true
+discard t "opt of opt" scan? "a" [opt opt "a"] true
+discard t "some of opt terminates" scan? "b" [some opt "a" "b"] true
+setA: charset "a"
+setB: charset "b"
+discard t "count of some" scan? "aabb" [2 [some [setA | setB]]] false
+discard t "some of count" scan? "aaaa" [some 2 "a"] true
+discard t "not of not of a rule" scan? "ab" [not not grp "ab"] true
+discard t "ahead of a rule then match" scan? "ab" [ahead grp grp] true
+discard t "to a rule" scan? "xxab" [to grp grp] true
+discard t "thru a rule" scan? "xxab" [thru grp] true
+discard t "between over a rule" scan? "abab" [between 1 3 grp] true
+
+;; a rule bound to a block, reached where a terminal would be
+alt: ["p" | "q"]
+inner: [alt alt]
+outer: [inner | "zz"]
+discard t "block rule in terminal position" scan? "pq" outer true
+discard t "block rule falls through to the arm" scan? "zz" outer true
+discard t "block rule rejects" scan? "pz" outer false
+discard t "block rule under some" scan? "pqqp" [some inner] true
+discard t "block rule under to" scan? "..pq" [to inner inner] true
+
+;; captures crossing all of it
+nest1: scan "abac!" [capture 'whole grp3]
+discard t "capture over nested rules" nest1\whole "abac!"
+nest2: scan "pqpq" [collect 'pairs [some [keep inner]]]
+discard t "collect over a block rule" size nest2\pairs 2
+nest3: scan "xxpq" [to inner capture 'tail [some skip]]
+discard t "capture after to a rule" nest3\tail "pq"
+nest4: scan "pq" [ahead [capture 'a alt] capture 'b inner]
+discard t "capture under ahead of a rule" nest4\a "p"
+discard t "capture after the lookahead" nest4\b "pq"
+
+;; the same shapes over block input, through into
+bnest: [[1 [2 3]] [4 [5 6]]]
+discard t "into nested twice" scan? bnest [some into [:integer into [:integer :integer]]] true
+bn2: scan bnest [collect 'ns [some into [keep :integer into [some keep :integer]]]]
+discard t "collect through descent" size bn2\ns 6
+discard t "into under a lookahead" scan? bnest [ahead [into [:integer :block]] some skip] true
+discard t "into under not" scan? [[1]] [not [into [:string]] skip] true
+
+;; and again with memoization on, which routes named rules elsewhere
+discard t "memo over nested rules" (not? null? scan.memo: ['inner 'alt] "pqpq" [some inner]) true
+discard t "memo agrees with plain here" (scan? "pqpq" [some inner]) = (not? null? scan.memo: ['inner 'alt] "pqpq" [some inner]) true
+mn: scan.memo: ['inner] "pqpq" [collect 'c [some [keep inner]]]
+discard t "memo replays kept spans" size mn\c 2
+discard t "memo does not break failure" (null? scan.memo: ['inner 'alt] "pz" [some inner]) true
+
+;; a long alternation, so the dead-arm walk is exercised
+longalt: ["aa" | "ab" | "ac" | ["ad" "e"] | some "af" | 2 "ag" | opt "ah" "i"]
+discard t "long alternation, first" scan? "aa" longalt true
+discard t "long alternation, middle" scan? "ade" longalt true
+discard t "long alternation, quantified arm" scan? "afaf" longalt true
+discard t "long alternation, counted arm" scan? "agag" longalt true
+discard t "long alternation, last arm" scan? "ahi" longalt true
+discard t "long alternation, last arm without opt" scan? "i" longalt true
+discard t "long alternation rejects" scan? "az" longalt false
+
+;; errors still point at the right place through all that nesting
+discard scan "abaz!" grp3
+en: scanError
+discard t "nested error column" (in? "column 4" en) true
+discard t "nested error names the rule" (in? "while matching: grp" en) true
+discard t "nested error lists both arms" (in? "literal b, literal c" en) true
+
+;; ── summary ──────────────────────────────────────────────────────────
+
+print ""
+print ["tests:" R\pass + R\fail "  passed:" R\pass "  failed:" R\fail]
+unless zero? R\fail [
+    print ""
+    loop R\notes 'n -> print ["  FAIL" n]
+    panic "carpintero: test suite failed"
+]
+print "all green"

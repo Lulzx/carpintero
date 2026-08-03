@@ -4,6 +4,12 @@
 ;; The pitch is expressiveness and rules as data, not throughput; the
 ;; compiled core proposed for Phase 3 narrows the gap without closing
 ;; it. Numbers below are for tracking the gap, not for winning.
+;;
+;; The last section is the one to watch over time: it runs one grammar
+;; over inputs that double, and prints the cost per kilobyte. Those
+;; figures should stay flat. When the matcher indexed the input string
+;; directly they did not — each doubling roughly quadrupled the work,
+;; because indexing an Arturo string walks it from the front.
 
 import ./"../carpintero.art"!
 
@@ -35,6 +41,22 @@ t3: benchmark.get [ ok3: scan? jdoc jvalue ]
 print ["   scan," size jdoc "chars:       " t3 "  result:" ok3]
 
 print ""
+print "-- extraction, not just validation -----------------------------"
+;; captures and collect carry their own cost: every kept span is a log
+;; entry that materializes on commit
+alpha: charset "a-zA-Z"
+wdoc: join.with: " " map 1..400 'i -> "word"
+t6: benchmark.get [ r6: scan wdoc [collect 'ws [keep [some alpha] any [" " keep [some alpha]]]] ]
+print ["   collect, 400 words:       " t6 "  kept:" size r6\ws]
+
+print ""
+print "-- block input, arturo scanning itself -------------------------"
+src: to :block read ./"../carpintero.art"
+funcdef: [:label 'function opt :attribute :block :block]
+t7: benchmark.get [ r7: scan src [collect 'defs [any [keep funcdef | skip]]] ]
+print ["   scan," size src "elements:    " t7 "  found:" size r7\defs]
+
+print ""
 print "-- pathological backtracking, with and without memo ------------"
 ;; the textbook exponential shape: every level re-evaluates the level
 ;; below twice at the same position when its first arm fails, so the
@@ -60,3 +82,17 @@ t4: benchmark.get [ ok4: scan? pdoc e12 ]
 print ["   tower of 12, no memo:    " t4 "  result:" ok4]
 t5: benchmark.get [ ok5: not? null? scan.memo: allrules pdoc e12 ]
 print ["   tower of 12, memo:       " t5 "  result:" ok5]
+
+print ""
+print "-- scaling: cost per kilobyte should stay flat -----------------"
+;; the cheapest grammar there is, so the measurement is dominated by
+;; the cost of reaching each position rather than by deciding anything
+;; about it. Per-kilobyte figures that climb with the input mean the
+;; matcher is super-linear in its own bookkeeping.
+loop [4000 8000 16000 32000] 'chars [
+    big: repeat "7" chars
+    kb: (to :floating chars) / 1024.0
+    tt: benchmark.get [ okk: scan? big [some digit] ]
+    per: (to :floating replace to :string tt " ms" "") / kb
+    print ["  " chars "chars:" tt " per KB:" per "ms  result:" okk]
+]
