@@ -1,0 +1,155 @@
+;; demo.art — exercises the Phase 0 draft in carpintero.art
+
+import ./"carpintero.art"!
+
+check: function [label got expected][
+    status: (got = expected)? -> "ok  " -> "FAIL"
+    print [status label "->" got]
+]
+
+;; the proposal's opening example
+digit: charset "0-9"
+
+date: [
+    capture 'year  [4 digit]  "-"
+    capture 'month [2 digit]  "-"
+    capture 'day   [2 digit]
+]
+
+r: scan "2026-08-03" date
+check "date: year"  r\year  "2026"
+check "date: month" r\month "08"
+check "date: day"   r\day   "03"
+check "date: bad input is null" scan "2026-8-03" date null
+check "scan? yes" scan? "2026-08-03" date true
+check "scan? no"  scan? "2026-08-3x" date false
+
+;; whole-input contract and prefix mode
+check "partial match fails" scan? "2026-08-03 extra" date false
+pr: scan.prefix "2026-08-03 extra" date
+check "prefix: reached" pr\reached 10
+check "prefix: captures" pr\captures\year "2026"
+
+;; alternation, ordered choice
+ab: [some ["a" | "b"]]
+check "alternation" scan? "abba" ab true
+check "alternation rejects" scan? "abca" ab false
+
+;; capture rollback: the failed alternative's capture must not leak
+leak: [capture 'x "ab" "!" | capture 'y "abc"]
+r2: scan "abc" leak
+check "rollback: dead capture gone" key? r2 "x" false
+check "rollback: live capture kept" r2\y "abc"
+
+;; recursion: balanced parens
+parens: ["(" any parens ")"]
+check "recursion: balanced" scan? "(()(()))" [some parens] true
+check "recursion: unbalanced" scan? "(()" [some parens] false
+
+;; quantifiers
+check "exact count" scan? "aaaa" [4 "a"] true
+check "exact count fails" scan? "aaa" [4 "a"] false
+check "between" scan? "aaa" [between 2 4 "a"] true
+check "between too few" scan? "a" [between 2 4 "a"] false
+check "opt present" scan? "-5" [opt "-" some digit] true
+check "opt absent" scan? "5" [opt "-" some digit] true
+
+;; progress guard: a nullable loop body terminates instead of hanging
+check "progress guard" scan? "xy" [some [opt "a"] "xy"] true
+
+;; to / thru
+kv: [capture 'k to "=" thru "=" capture 'v [some skip]]
+r3: scan "key=value" kv
+check "to: key" r3\k "key"
+check "thru: value" r3\v "value"
+
+;; charset ranges and literal dash
+ident: charset "a-z0-9-"
+check "charset range" scan? "abc-42" [some ident] true
+check "charset rejects" scan? "ABC" [some ident] false
+
+;; last-wins on repeated capture
+r4: scan "aaab" [some [capture 'c skip]]
+check "last capture wins" r4\c "b"
+
+;; unbound rule word is a grammar error (uncomment to see the panic)
+; scan "x" [nosuchrule]
+
+;; left recursion is rejected with the cycle named (uncomment to see)
+; expr: [expr "+" digit | digit]
+; scan "1+2" expr
+
+;; a JSON validator: mutual recursion stress test
+;; whitespace kept to spaces only for brevity
+ws: [any " "]
+jstring: [{"} to {"} skip]
+jnumber: [opt "-" some digit opt ["." some digit]]
+jvalue: [jstring | jnumber | jobject | jarray | "true" | "false" | "null"]
+jarray: ["[" ws opt [jvalue ws any ["," ws jvalue ws]] "]"]
+jpair: [jstring ws ":" ws jvalue]
+jobject: ["{" ws opt [jpair ws any ["," ws jpair ws]] "}"]
+
+check "json accepts" scan? {{"a": [1, 2.5, "x"], "b": {"c": null}}} jvalue true
+check "json empty containers" scan? {{"a": [], "b": {}}} jvalue true
+check "json rejects" scan? {{"a": }} jvalue false
+
+;; Phase 1, block matching. The flagship of the proposal, pattern-matching Arturo code itself.
+
+check "block: type terminals" scan? [42 "hi"] [:integer :string] true
+check "block: type mismatch" scan? [42 42] [:integer :string] false
+check "block: literal word" scan? [function] ['function] true
+check "block: quote escapes keywords" scan? [some 5] [quote some quote 5] true
+check "block: string element" scan? ["ab" "cd"] ["ab" skip] true
+
+code: [
+    greet: function [name][ print name ]
+    x: 10
+    add: function [a b][ a + b ]
+]
+
+funcdef: [
+    capture 'name :label
+    'function
+    capture 'params :block
+    capture 'body :block
+]
+
+r5: scan code [any [funcdef | skip]]
+check "block: funcdef found (last wins)" to :string first r5\name "add"
+check "block: funcdef params" first r5\params [a b]
+check "block: non-code rejects" scan? [1 2 3] funcdef false
+
+;; Phase 2, lookahead, collect and keep, host escape, error reporting.
+
+check "ahead looks without consuming" scan? "ab" [ahead "ab" "ab"] true
+check "not negates" scan? "ba" [not "a" skip skip] true
+check "not fails on match" scan? "ab" [not "a" skip skip] false
+
+alpha: charset "a-z"
+r6: scan "one, two, three" [collect 'words [some [keep [some alpha] | skip]]]
+check "collect gathers" size r6\words 3
+check "collect first" first r6\words "one"
+
+;; keeps from a failed alternative must disappear with it
+r7: scan "abc" [collect 'xs [keep "ab" "!"] | thru end]
+check "collect rollback" key? r7 "xs" false
+
+;; the re-run contract for host escapes, demonstrated: the escape runs
+;; once per loop attempt, including the attempt that fails.
+;; escape blocks must call functions rather than assign directly, see
+;; bugs, do-assignment-crash
+G: #[n: 0]
+note: function [x][ G\n: G\n + x  x ]
+r8: scan "aab" [some [do [note 1] "a"] "b"]
+check "do runs per attempt" G\n 3
+
+;; farthest-failure error report
+r9: scan "2026-08-0x" date
+msg: scanError
+check "error line and column" in? "line 1, column 10" msg true
+check "error names expected" in? "charset 0-9" msg true
+
+print ""
+print "-- error demos (each panics; run separately) -----------------"
+print {   scan "x" [nosuchrule]}
+print {   expr: [expr "+" digit | digit]  ;  scan "1+2" expr}

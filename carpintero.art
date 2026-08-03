@@ -1,0 +1,629 @@
+;; carpintero.art — draft of the PARSE-class grammar dialect proposed
+;; in proposal.md, covering the Phase 0 through Phase 2 scope:
+;; quantifiers with a progress guard, ordered choice, captures with
+;; rollback, charsets, named and recursive rules, left-recursion
+;; rejection, block matching with type and literal-word terminals plus
+;; quote, lookahead with ahead and not, collect and keep, the do host
+;; escape, fail with a message, and farthest-failure error reporting
+;; through scanError.
+;;
+;; Grammar elements understood by the matcher:
+;;   string and char literals
+;;   charsets from the charset function, with ranges such as a-z and
+;;     a backslash before a dash for a literal dash
+;;   blocks as sequences, the bar symbol for ordered alternatives
+;;   some R, any R, opt R, N R, between N M R
+;;   to R, thru R, skip, end
+;;   capture with a literal name and a rule
+;;   any other word: a named rule, resolved when scan runs
+;;
+;; Two workarounds for Arturo 0.10.0 interpreter quirks, found while
+;; writing this file:
+;;   1. comments avoid quote marks, brackets and backslashes, since the
+;;      lexer does not fully ignore comment contents — a backslash-dash
+;;      in a comment hangs it
+;;   2. every function call whose result is unused is still assigned to
+;;      a dummy variable: a discarded call result can leak into the
+;;      argument stream of an enclosing call
+
+;; ── charsets ─────────────────────────────────────────────────────────
+
+charset: function [spec][
+    ranges: []
+    n: size spec
+    i: 0
+    while [i < n][
+        c: spec\[i]
+        done: false
+        ; escaped dash: backslash before dash 92 = backslash
+        if and? (c = to :char 92) ((i + 1) < n) [
+            if (spec\[i + 1]) = '-' [
+                ranges: append ranges @[@[45 45]]
+                i: i + 2
+                done: true
+            ]
+        ]
+        ; range c-h: dash flanked on both sides
+        if and? (not? done) ((i + 2) < n) [
+            if (spec\[i + 1]) = '-' [
+                lo: to :integer c
+                hi: to :integer spec\[i + 2]
+                if hi < lo -> panic ~"carpintero: inverted charset range in |spec|"
+                ranges: append ranges @[@[lo hi]]
+                i: i + 3
+                done: true
+            ]
+        ]
+        unless done [
+            cp: to :integer c
+            ranges: append ranges @[@[cp cp]]
+            i: i + 1
+        ]
+    ]
+    #[kind: 'charset  spec: spec  ranges: ranges]
+]
+
+csMatch?: function [cs c][
+    cp: to :integer c
+    hit: false
+    unless empty? cs\ranges [
+        loop cs\ranges 'r [
+            if and? (cp >= r\0) (cp =< r\1) -> hit: true
+        ]
+    ]
+    hit
+]
+
+;; ── matcher state ────────────────────────────────────────────────────
+;; One global record, mutated in place. The capture log holds triples
+;; of name, start and end; values materialize only on overall success,
+;; and rollback is truncation — see Backtracking semantics in the
+;; proposal.
+
+CS: #[inp: ""  len: 0  log: []  isblk: false  far: 0  exp: []  coldepth: 0]
+
+logMark: function [][size CS\log]
+
+logTrim: function [sz][
+    if (size CS\log) > sz [
+        CS\log: (sz = 0)? -> [] -> slice CS\log 0 sz - 1
+    ]
+    true
+]
+
+;; record a terminal failure for the farthest-failure error report,
+;; then fail — see Error reporting in the proposal
+failAt: function [pos what][
+    if pos > CS\far [
+        CS\far: pos
+        CS\exp: []
+    ]
+    if pos = CS\far [
+        unless in? what CS\exp [ CS\exp: append CS\exp what ]
+    ]
+    null
+]
+
+;; ── rule structure ───────────────────────────────────────────────────
+
+KEYWORDS: ["some" "any" "opt" "between" "capture" "to" "thru" "skip" "end" "quote" "ahead" "not" "collect" "keep" "do" "fail"]
+
+;; number of items the element starting at idx occupies
+elemSpan: function [items idx][
+    it: items\[idx]
+    if integer? it -> return 1 + elemSpan items idx + 1
+    unless word? it -> return 1
+    w: to :string it
+    if in? w ["some" "any" "opt" "to" "thru" "ahead" "not" "keep"] -> return 1 + elemSpan items idx + 1
+    if w = "between" -> return 3 + elemSpan items idx + 3
+    if in? w ["capture" "collect"] -> return 2 + elemSpan items idx + 2
+    if in? w ["quote" "do" "fail"] -> return 2
+    1
+]
+
+;; ── the matcher ──────────────────────────────────────────────────────
+;; Every match* function returns the new input position, or null on
+;; failure, and guarantees the capture log is unchanged after a failure.
+
+matchElem: function [items idx pos][
+    sz: logMark
+    p: matchElemRaw items idx pos
+    if null? p [ t: logTrim sz ]
+    p
+]
+
+matchElemRaw: function [items idx pos][
+    it: items\[idx]
+
+    if string? it [
+        if CS\isblk [
+            desc: ~"literal |it|"
+            if pos >= CS\len -> return failAt pos desc
+            el: CS\inp\[pos]
+            if and? (string? el) (el = it) -> return pos + 1
+            return failAt pos desc
+        ]
+        n: size it
+        if n = 0 -> return pos
+        desc: ~"literal |it|"
+        if (pos + n) > CS\len -> return failAt pos desc
+        if (slice CS\inp pos pos + n - 1) = it -> return pos + n
+        return failAt pos desc
+    ]
+    if char? it [
+        desc: ~"char |it|"
+        if pos >= CS\len -> return failAt pos desc
+        if CS\isblk [
+            el: CS\inp\[pos]
+            if and? (char? el) (el = it) -> return pos + 1
+            return failAt pos desc
+        ]
+        if (CS\inp\[pos]) = it -> return pos + 1
+        return failAt pos desc
+    ]
+    if block? it -> return matchBlock it pos
+    if dictionary? it [
+        desc: ~"charset |it\spec|"
+        if pos >= CS\len -> return failAt pos desc
+        if CS\isblk [
+            el: CS\inp\[pos]
+            unless char? el -> return failAt pos desc
+            return (csMatch? it el)? -> pos + 1 -> failAt pos desc
+        ]
+        if csMatch? it CS\inp\[pos] -> return pos + 1
+        return failAt pos desc
+    ]
+    if type? it [
+        unless CS\isblk -> panic "carpintero: type terminals need block input"
+        desc: to :string it
+        if pos >= CS\len -> return failAt pos desc
+        if (type CS\inp\[pos]) = it -> return pos + 1
+        return failAt pos desc
+    ]
+    if literal? it [
+        unless CS\isblk -> panic "carpintero: literal word terminals need block input"
+        desc: ~"word |to :string it|"
+        if pos >= CS\len -> return failAt pos desc
+        el: CS\inp\[pos]
+        unless word? el -> return failAt pos desc
+        return ((to :string el) = to :string it)? -> pos + 1 -> failAt pos desc
+    ]
+    if integer? it [
+        p: pos
+        if it > 0 [
+            loop 1..it 'k [
+                p2: matchElem items idx + 1 p
+                if null? p2 -> return null
+                p: p2
+            ]
+        ]
+        return p
+    ]
+    if word? it [
+        w: to :string it
+        if w = "skip" -> return (pos < CS\len)? -> pos + 1 -> failAt pos "any value"
+        if w = "end"  -> return (pos = CS\len)? -> pos -> failAt pos "end of input"
+        if w = "some" -> return matchMany items idx + 1 pos true
+        if w = "any"  -> return matchMany items idx + 1 pos false
+        if w = "opt" [
+            p: matchElem items idx + 1 pos
+            return (null? p)? -> pos -> p
+        ]
+        if w = "to"   -> return matchScan items idx + 1 pos false
+        if w = "thru" -> return matchScan items idx + 1 pos true
+        if w = "between" [
+            lo: items\[idx + 1]
+            hi: items\[idx + 2]
+            unless and? (integer? lo) (integer? hi) [
+                panic "carpintero: between expects two integer bounds"
+            ]
+            return matchBetween items idx + 3 pos lo hi
+        ]
+        if w = "capture" [
+            nm: items\[idx + 1]
+            unless literal? nm [
+                panic "carpintero: capture expects a literal name, as in: capture 'year rule"
+            ]
+            p: matchElem items idx + 2 pos
+            if null? p -> return null
+            CS\log: append CS\log @[@["cap" to :string nm  pos  p]]
+            return p
+        ]
+        if w = "ahead" [
+            p: matchElem items idx + 1 pos
+            return (null? p)? -> null -> pos
+        ]
+        if w = "not" [
+            p: matchElem items idx + 1 pos
+            return (null? p)? -> pos -> null
+        ]
+        if w = "collect" [
+            nm: items\[idx + 1]
+            unless literal? nm [
+                panic "carpintero: collect expects a literal name, as in: collect 'items rule"
+            ]
+            CS\log: append CS\log @[@["copen" to :string nm 0 0]]
+            CS\coldepth: CS\coldepth + 1
+            p: matchElem items idx + 2 pos
+            CS\coldepth: CS\coldepth - 1
+            if null? p -> return null
+            CS\log: append CS\log @[@["cclose" "" 0 0]]
+            return p
+        ]
+        if w = "keep" [
+            if CS\coldepth = 0 -> panic "carpintero: keep outside collect"
+            p: matchElem items idx + 1 pos
+            if null? p -> return null
+            CS\log: append CS\log @[@["keep" "" pos p]]
+            return p
+        ]
+        if w = "do" [
+            op: items\[idx + 1]
+            unless block? op -> panic "carpintero: do expects a block of host code"
+            res: do op
+            return pos
+        ]
+        if w = "fail" [
+            msg: items\[idx + 1]
+            panic ~"carpintero: |msg| at position |pos|"
+        ]
+        if w = "quote" [
+            unless CS\isblk -> panic "carpintero: quote needs block input"
+            if pos >= CS\len -> return null
+            v: items\[idx + 1]
+            return ((CS\inp\[pos]) = v)? -> pos + 1 -> null
+        ]
+        ; a named rule
+        unless set? w -> panic ~"carpintero: unbound rule word '|w|'"
+        return matchElem @[var w] 0 pos
+    ]
+    panic ~"carpintero: unexpected item in rule: |it|"
+]
+
+;; some / any: greedy repetition with the mandatory progress guard —
+;; an iteration that matches without consuming ends the loop
+matchMany: function [items idx pos needOne][
+    p: matchElem items idx pos
+    if null? p -> return (needOne)? -> null -> pos
+    going: true
+    while [going][
+        p2: matchElem items idx p
+        going: false
+        unless null? p2 [
+            unless p2 = p [
+                p: p2
+                going: true
+            ]
+        ]
+    ]
+    p
+]
+
+matchBetween: function [items idx pos lo hi][
+    cnt: 0
+    p: pos
+    going: true
+    while [and? going (cnt < hi)][
+        p2: matchElem items idx p
+        going: false
+        unless null? p2 [
+            unless p2 = p [
+                p: p2
+                cnt: cnt + 1
+                going: true
+            ]
+        ]
+    ]
+    (cnt >= lo)? -> p -> null
+]
+
+;; to / thru: advance until the operand matches
+matchScan: function [items idx pos inclusive][
+    i: pos
+    while [i =< CS\len][
+        p: matchElem items idx i
+        unless null? p -> return (inclusive)? -> p -> i
+        i: i + 1
+    ]
+    null
+]
+
+;; a block: ordered alternatives split on the bar symbol,
+;; each alternative a sequence
+matchBlock: function [blk pos][
+    nItems: size blk
+    start: 0
+    i: 0
+    while [i =< nItems][
+        isBar: false
+        if i < nItems [
+            if symbol? blk\[i] [
+                if (to :string blk\[i]) = "|" -> isBar: true
+            ]
+        ]
+        if or? isBar (i = nItems) [
+            sz: logMark
+            p: matchSeq blk start i pos
+            unless null? p -> return p
+            t: logTrim sz
+            start: i + 1
+        ]
+        i: i + 1
+    ]
+    null
+]
+
+matchSeq: function [items start stop pos][
+    idx: start
+    p: pos
+    while [idx < stop][
+        p2: matchElem items idx p
+        if null? p2 -> return null
+        p: p2
+        idx: idx + elemSpan items idx
+    ]
+    p
+]
+
+;; ── grammar pre-pass ─────────────────────────────────────────────────
+;; Runs once per scan, before matching: resolve every named rule — an
+;; unbound word is an error here, not a match failure — then compute
+;; nullability by fixpoint, and reject left recursion — direct or
+;; indirect, including through nullable prefixes. See Left recursion
+;; in the proposal.
+
+collectRules: function [blk reg][
+    if empty? blk -> return true
+    n: size blk
+    i: 0
+    while [i < n][
+        it: blk\[i]
+        step: 1
+        if block? it [ s2: collectRules it reg ]
+        if word? it [
+            w: to :string it
+            if in? w ["quote" "do" "fail"] -> step: 2
+            unless in? w KEYWORDS [
+                unless key? reg w [
+                    unless set? w -> panic ~"carpintero: unbound rule word '|w|'"
+                    reg\[w]: var w
+                    if block? reg\[w] [
+                        sub: collectRules reg\[w] reg
+                    ]
+                ]
+            ]
+        ]
+        i: i + step
+    ]
+    true
+]
+
+elemNullable?: function [items idx nmap][
+    it: items\[idx]
+    if string? it -> return (size it) = 0
+    if block? it -> return blockNullable? it nmap
+    if integer? it -> return or? (it = 0) (elemNullable? items idx + 1 nmap)
+    if word? it [
+        w: to :string it
+        if in? w ["any" "opt" "to" "end" "ahead" "not" "do"] -> return true
+        if in? w ["some" "thru" "keep"] -> return elemNullable? items idx + 1 nmap
+        if w = "between" -> return or? ((items\[idx + 1]) = 0) (elemNullable? items idx + 3 nmap)
+        if in? w ["capture" "collect"] -> return elemNullable? items idx + 2 nmap
+        if in? w ["quote" "fail" "skip"] -> return false
+        return (key? nmap w)? -> nmap\[w] -> false
+    ]
+    false
+]
+
+seqNullable?: function [items start stop nmap][
+    idx: start
+    while [idx < stop][
+        unless elemNullable? items idx nmap -> return false
+        idx: idx + elemSpan items idx
+    ]
+    true
+]
+
+blockNullable?: function [blk nmap][
+    nItems: size blk
+    start: 0
+    i: 0
+    result: false
+    while [i =< nItems][
+        isBar: false
+        if i < nItems [
+            if symbol? blk\[i] [
+                if (to :string blk\[i]) = "|" -> isBar: true
+            ]
+        ]
+        if or? isBar (i = nItems) [
+            if seqNullable? blk start i nmap -> result: true
+            start: i + 1
+        ]
+        i: i + 1
+    ]
+    result
+]
+
+computeNullmap: function [reg][
+    nmap: #[]
+    if empty? keys reg -> return nmap
+    loop keys reg 'k [
+        v: reg\[k]
+        nmap\[k]: (string? v)? -> ((size v) = 0) -> false
+    ]
+    changed: true
+    while [changed][
+        changed: false
+        loop keys reg 'k [
+            v: reg\[k]
+            if block? v [
+                if and? (blockNullable? v nmap) (not? nmap\[k]) [
+                    nmap\[k]: true
+                    changed: true
+                ]
+            ]
+        ]
+    ]
+    nmap
+]
+
+;; names invocable at the same input position as the element at idx
+elemHeads: function [items idx nmap][
+    it: items\[idx]
+    if block? it -> return blockHeads it nmap
+    if integer? it -> return (it = 0)? -> [] -> elemHeads items idx + 1 nmap
+    if word? it [
+        w: to :string it
+        if in? w ["some" "any" "opt" "to" "thru" "ahead" "not" "keep"] -> return elemHeads items idx + 1 nmap
+        if w = "between" -> return elemHeads items idx + 3 nmap
+        if in? w ["capture" "collect"] -> return elemHeads items idx + 2 nmap
+        if in? w ["quote" "do" "fail" "skip" "end"] -> return []
+        return @[w]
+    ]
+    []
+]
+
+seqHeads: function [items start stop nmap][
+    hs: []
+    idx: start
+    while [idx < stop][
+        hs: hs ++ elemHeads items idx nmap
+        unless elemNullable? items idx nmap -> return hs
+        idx: idx + elemSpan items idx
+    ]
+    hs
+]
+
+blockHeads: function [blk nmap][
+    hs: []
+    nItems: size blk
+    start: 0
+    i: 0
+    while [i =< nItems][
+        isBar: false
+        if i < nItems [
+            if symbol? blk\[i] [
+                if (to :string blk\[i]) = "|" -> isBar: true
+            ]
+        ]
+        if or? isBar (i = nItems) [
+            hs: hs ++ seqHeads blk start i nmap
+            start: i + 1
+        ]
+        i: i + 1
+    ]
+    hs
+]
+
+dfsCycle: function [k reg nmap state path][
+    if state\[k] = 2 -> return true
+    if state\[k] = 1 [
+        cyc: join.with: " -> " append path k
+        panic ~"carpintero: left recursion detected: |cyc|"
+    ]
+    state\[k]: 1
+    v: reg\[k]
+    if block? v [
+        hs: blockHeads v nmap
+        unless empty? hs [
+            loop hs 'h [
+                if key? reg h [
+                    sub: dfsCycle h reg nmap state append path k
+                ]
+            ]
+        ]
+    ]
+    state\[k]: 2
+    true
+]
+
+checkGrammar: function [rule][
+    reg: #[]
+    cr: collectRules rule reg
+    if empty? keys reg -> return true
+    nmap: computeNullmap reg
+    state: #[]
+    loop keys reg 'k [ state\[k]: 0 ]
+    loop keys reg 'k [ d: dfsCycle k reg nmap state [] ]
+    true
+]
+
+;; ── public API ───────────────────────────────────────────────────────
+;; scan      : dictionary of captures, or null on failure
+;; scan?     : boolean
+;; scanError : message for the most recent failed scan, with line and
+;;             column for string input and index for block input
+;; The whole input must match; scan.prefix accepts a prefix match and
+;; reports how far it reached.
+
+scan: function [input rule][
+    pfx: attr 'prefix
+    ok: checkGrammar rule
+    CS\inp: input
+    CS\len: size input
+    CS\isblk: block? input
+    CS\log: []
+    CS\far: 0
+    CS\exp: []
+    CS\coldepth: 0
+    p: matchBlock rule 0
+    if null? p -> return null
+    if and? (null? pfx) (p <> CS\len) -> return null
+    caps: #[]
+    emptyCap: (CS\isblk)? -> [] -> ""
+    cnames: []
+    citems: []
+    unless empty? CS\log [
+        loop CS\log 'e [
+            kind: e\0
+            if kind = "cap" [
+                caps\[e\1]: (e\2 = e\3)? -> emptyCap -> slice CS\inp e\2 e\3 - 1
+            ]
+            if kind = "copen" [
+                cnames: append cnames e\1
+                citems: append citems @[[]]
+            ]
+            if kind = "keep" [
+                v: (e\2 = e\3)? -> emptyCap -> slice CS\inp e\2 e\3 - 1
+                top: (size citems) - 1
+                citems\[top]: append citems\[top] @[v]
+            ]
+            if kind = "cclose" [
+                top: (size citems) - 1
+                caps\[last cnames]: citems\[top]
+                cnames: chop cnames
+                citems: chop citems
+            ]
+        ]
+    ]
+    (null? pfx)? -> caps -> #[reached: p  captures: caps]
+]
+
+;; human-readable report for the most recent failed scan, built from
+;; the farthest-failure high-water mark
+scanError: function [][
+    f: CS\far
+    exp: (empty? CS\exp)? -> "end of input" -> join.with: ", " CS\exp
+    if CS\isblk [
+        return ~"scan failed at index |f| — expected: |exp|"
+    ]
+    line: 1
+    col: 1
+    nl: to :char 10
+    i: 0
+    while [i < f][
+        c: CS\inp\[i]
+        col: col + 1
+        if c = nl [
+            line: line + 1
+            col: 1
+        ]
+        i: i + 1
+    ]
+    ~"scan failed at line |line|, column |col| — expected: |exp|"
+]
+
+scan?: function [input rule][
+    not? null? scan input rule
+]
