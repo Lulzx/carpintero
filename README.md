@@ -1,5 +1,7 @@
 # Carpintero
 
+*Documentation: <https://lulzx.github.io/carpintero/>*
+
 A PARSE-class grammar dialect for [Arturo](https://arturo-lang.io): rules are
 ordinary Arturo blocks that compose, nest, and recurse, and they match
 strings *and* blocks — so Arturo can pattern-match its own source.
