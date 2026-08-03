@@ -1,22 +1,33 @@
 # Arturo 0.10.0 interpreter bugs
 
 Found while building the Carpintero grammar-dialect draft (`../carpintero.art`)
-on Arturo 0.10.0 "Arizona Bark" (arm64/macos, Homebrew). Each file is a
-minimal self-contained repro, ready to attach to an issue on
+on Arturo 0.10.0 "Arizona Bark" (arm64/macos, Homebrew). Each `.art` file is a
+minimal self-contained repro, and each `issue-*.md` is a draft report ready for
 `arturo-lang/arturo`. Not filed yet.
 
-## 1. `comment-lexer-hang.art` — lexer does not fully ignore comment contents
+All three bugs have in-language mitigations, included in the package
+itself. Each section names its fix.
 
-A `\-` sequence inside a line comment hangs the parser forever (100% CPU,
-no output). Other comment contents produce phantom syntax errors at EOF
-("missing closing parenthesis") or silent `exit 0` with no output, and some
-failures depend on the *combination* of adjacent comment lines, so the same
-comment can be fine in one file and fatal in another.
+## 1. `comment-lexer-hang.art`: lexer does not fully ignore comment contents
 
-Run: `arturo comment-lexer-hang.art` → hangs (kill it manually).
+A `\-` sequence inside a line comment hangs the file loader forever (100%
+CPU, no output). Other comment contents produce phantom syntax errors at
+EOF ("missing closing parenthesis") or silent exits, and some failures
+depend on the *combination* of adjacent comment lines, so the same comment
+can be fine in one file and fatal in another. The string-lexer path
+(`to :block` on the same source) does not hang, but silently corrupts the
+token stream instead. Both paths mishandle comment bytes.
+
+Run: `arturo comment-lexer-hang.art` and it hangs (kill it manually).
 Expected: prints `should print but never does`.
 
-## 2. `discarded-return-leak.art` — discarded call results corrupt argument passing
+**Mitigation:** `read` returns raw source without lexing, so strip
+comments at the string level before the lexer sees them. The package
+provides this as `stripComments`/`loadSafe` (the stripper is itself a
+Carpintero grammar), and `../examples/safeload.art` runs this very repro file
+through it, successfully.
+
+## 2. `discarded-return-leak.art`: discarded call results corrupt argument passing
 
 When a function is called as an argument to another call, and *inside* it a
 call's result is discarded (most reliably a value produced by an early
@@ -27,20 +38,27 @@ slot receives the leaked value and the real argument is lost.
 Run: `arturo discarded-return-leak.art`.
 Expected: `expected: 42`, actual: `expected: 7`.
 
-Workaround used in carpintero.art: assign every unused call result to a
-dummy variable, and guard every `loop` that might iterate an empty
-collection.
+**Mitigation:** route every unused result through the `discard` builtin,
+including `discard loop items 'x [...]` for the empty-loop face, which it
+also fixes. `carpintero.art` does this throughout.
 
-## 3. `do-assignment-crash.art` — `do` of a block containing an assignment crashes when nested
+## 3. `do-assignment-crash.art`, `do-assignment-tail-crash.art`: `do` of a value-less-tail block corrupts the frame
 
-`do someBlock` works inside a function called from top level, but when the
-`do`-executing function is itself called from another function, a block
-containing a plain assignment (`x: 3`) or a path assignment (`G\n: 3`)
-crashes the interpreter silently (exit 1, no output, no error). Blocks
-containing only expressions or calls to arity-1+ functions work at any
-depth. Calls to zero-arity functions also crash in the same configuration.
+Originally diagnosed as "`do` of a block containing an assignment crashes
+when the executing function is nested." The second repro narrows the root
+cause: the trigger is a block whose **last expression produces no value**,
+that is a plain or path assignment, a `set` call, or a call to a function
+whose own body ends value-less. `do` of such a block leaves the enclosing
+frame expecting a value that never arrives. Whether that crashes is
+contextual (the same shape can work at one nesting depth and silently
+exit 1 at another), which makes one bug look like several.
 
-Run: `arturo do-assignment-crash.art`.
-Expected: prints `2`, then `3`, then `never reached`; actual: prints `2`
-then exits 1 silently.
+Run: `arturo do-assignment-crash.art`. Expected `2`, `3`,
+`never reached`. Actual: `2`, then silent exit 1.
+Run: `arturo do-assignment-tail-crash.art`. Expected two lines. Actual:
+one line, then silent exit 1, with no nesting involved at all.
 
+**Mitigation:** pad the block with a trailing value before evaluating:
+`discard do blk ++ [true]`. With the padding, every shape above works at
+any depth tested. `carpintero.art` pads its `do` and `defer` escape blocks
+this way, so grammar escapes may assign freely.

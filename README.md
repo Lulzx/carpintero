@@ -71,7 +71,9 @@ strips it, and returns the lexed block — which sidesteps the 0.10.0
 lexer bug where comment contents can hang or corrupt the interpreter
 (`examples/safeload.art` runs a file that hangs `arturo` directly).
 
-Semantics worth knowing, all deliberate (the design rationale lives in
+The full reference — every word, the error report, memoization, the
+PEG pitfalls and their fixes — is [MANUAL.md](MANUAL.md). Semantics
+worth knowing, all deliberate (the design rationale lives in
 [proposal.md](proposal.md)):
 
 - The whole input must match; use `scan.prefix` for prefix matching.
