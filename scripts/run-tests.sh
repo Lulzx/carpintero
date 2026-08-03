@@ -5,6 +5,9 @@
 # leaves the abandoned frames' values behind for the next statements to
 # misread, so a single process cannot check more than one of them.
 set -u
+# The nim suites are piped through `tail`, and without this the pipeline
+# reports tail's status, so a failing suite counted as a passing one.
+set -o pipefail
 cd "$(dirname "$0")/.."
 
 fails=0
@@ -49,6 +52,14 @@ if command -v nim > /dev/null 2>&1; then
     echo
     echo "== nim/tests/test_vm.nim =="
     (cd nim && nim c --hints:off -r tests/test_vm.nim 2>&1 | tail -3) || fails=$((fails + 1))
+
+    # The FFI path reads its input with wire.nim rather than std/json, so
+    # the two readers are checked against each other. Set
+    # CARPINTERO_WIRE_CORPUS to a file from adapter/dump-wire.art to run the
+    # same comparison over a real corpus rather than the written cases.
+    echo
+    echo "== nim/tests/test_wire.nim =="
+    (cd nim && nim c --hints:off -r tests/test_wire.nim 2>&1 | tail -3) || fails=$((fails + 1))
 
     # The differential run is the one that compares the two engines rather
     # than either engine against a written-down expectation. Cases carry the

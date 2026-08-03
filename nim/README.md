@@ -114,20 +114,20 @@ models opaquely survive untouched.
 
 ### What that costs, and what it argues
 
-Over the corpus `scanFast` takes 0.30 seconds against `scan`'s 15.8, about
-fifty times. Each is timed in its own process, which matters: measured in
+Over the corpus `scanFast` takes 0.25 seconds against `scan`'s 15.8, about
+sixty times. Each is timed in its own process, which matters: measured in
 one process that runs both, `scan` reports 22.5 seconds rather than 15.8
-while `scanFast` reports the same 0.30, so the same-process ratio flatters
+while `scanFast` reports the same 0.25, so the same-process ratio flatters
 the bridge by about 40%. The isolated pair is the honest one.
-`adapter/breakdown.art` says where the 0.30 goes:
+`adapter/breakdown.art` says where the 0.25 goes:
 
 | Stage | Time |
 | --- | --- |
 | `emitItem`, Arturo values straight to text | 0.19 s |
-| the call itself, JSON parsing and matching included | 0.08 s |
+| the call itself, reading the input and matching included | 0.045 s |
 
-The first version took 15.3 seconds to serialise, and four changes account
-for the difference.
+The first version took 15.3 seconds to serialise and 0.13 to call, and five
+changes account for the difference.
 
 Escaping ran as an interpreted loop over characters, at about 2.5
 microseconds each. `replace` scans in native code and is flat in the length
@@ -172,20 +172,27 @@ emitted once and looked up afterwards. That is worth about 17%. The emitter
 was checked by hashing everything it produces over the whole corpus before
 and after: the output is byte for byte what it was.
 
-What did not move is the part that matters. The call, JSON parsing and
-matching included, costs 80 milliseconds, and the compiled core scans the
-same corpus in about 30 when handed values it already holds. Serialisation
-is 70% of the bridge, down from 95%.
+The fifth round is the other end of the wire. The library read its input
+with `std/json`, which builds a `JsonNode` tree and then walks it a second
+time into `Item`s: 43 milliseconds of parsing and 14 of walking, against 32
+of matching. `src/carpintero/wire.nim` reads the same text straight into
+`Item`s in one pass, and over the corpus that is 48.5 milliseconds against
+6.7, so the call went from 80 milliseconds to 45. `load.nim` still reads the
+format through `std/json`, and `tests/test_wire.nim` parses both ways and
+compares the results, over written cases and over a corpus dumped by
+`adapter/dump-wire.art`. The JSON reader is the readable statement of what
+the format means; the fast one has to agree with it.
 
-What changed is what that 70% is made of. It is no longer escaping, a
-redundant encoding, or scopes created for locals nobody needed, which is
-what the four rounds removed. It is now traversing Arturo's existing value
-tree from Arturo and building a second representation of it, which on this
-corpus and this emitter works out at roughly 1.3 microseconds a value.
-Another round would probably find something (an iterative walk, a buffer API
-rather than strings), so this is not a floor. It is a change of kind: the
-remaining cost belongs to walking and rebuilding the values, not to how they
-are written down.
+The call is now within about 13 milliseconds of the match it performs, and
+the compiled core scans the same corpus in about 30 when handed values it
+already holds. What is left of the bridge is 78% serialisation, and it is no
+longer escaping, a redundant encoding, scopes for locals nobody needed, or a
+tree built to be thrown away, which is what the five rounds removed. It is
+traversing Arturo's existing value tree from Arturo and building a second
+representation of it, which on this corpus and this emitter works out at
+roughly 1.4 microseconds a value. That is a change of kind rather than a
+floor: what remains belongs to walking and rebuilding the values, not to how
+they are written down or read back.
 
 That is the argument for a builtin rather than a bridge, and it is the one
 thing an FFI experiment can establish that a benchmark cannot. Three modes,
@@ -194,7 +201,7 @@ same grammar, same corpus, same 287 definitions:
 | | Corpus time | |
 | --- | ---: | --- |
 | `scan` | 15.8 s | pure Arturo, the reference |
-| `scanFast` | 0.30 s | the shared library, no change to Arturo |
+| `scanFast` | 0.25 s | the shared library, no change to Arturo |
 | the core on values it already holds | 0.03 s | what direct access would expose |
 
 A builtin would take the `Value` block it was handed and match on it in
@@ -272,6 +279,7 @@ the compiled version made the gap obvious.
 | `grammar.nim` | The rule tree, and nullability by fixpoint |
 | `compile.nim` | Tree to program, and Ford's well-formedness check |
 | `vm.nim` | The matcher loop, the capture log, and materialising captures |
+| `wire.nim` | The FFI input format, read in one pass into `Item`s |
 | `carpintero.nim` | `scan` and `scan?` over the above |
 | `carpintero_ffi.nim` | The shared-library entry points Arturo calls |
 

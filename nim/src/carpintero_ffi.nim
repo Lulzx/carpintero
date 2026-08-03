@@ -20,7 +20,7 @@
 
 import std/[json, tables, strutils]
 import carpintero
-import carpintero/load
+import carpintero/[load, wire]
 
 var programs = initTable[string, Program]()
 var lastError = ""
@@ -54,15 +54,18 @@ proc cpScan(grammarJson: cstring, inputJson: cstring): cstring
             programs[gkey] = compile(loadGrammar(parseJson(gkey)))
         let prog = programs[gkey]
 
-        # ["block",[...]] or ["text","..."], the compact form fast.art emits
-        let inp = parseJson($inputJson)
+        # ["block",[...]] or ["text","..."], the compact form fast.art emits.
+        # This is the whole of the input on every scan, so it is read in one
+        # pass rather than through `std/json`: the tree and the walk over it
+        # cost more than the match does (43 ms and 14 ms against 32 ms over
+        # Arturo's own source). `wire.nim` is held to the JSON reader's
+        # answers by `tests/test_wire.nim`.
+        let inp = readWire($inputJson)
         var r: ScanResult
-        if inp[0].getStr == "block":
-            var items: seq[Item] = @[]
-            for e in inp[1]: items.add(loadItem(e))
-            r = scan(prog, items)
+        if inp.isText:
+            r = scan(prog, inp.text)
         else:
-            r = scan(prog, inp[1].getStr)
+            r = scan(prog, inp.items)
 
         var reply = newJObject()
         reply["ok"] = newJBool(r.ok)

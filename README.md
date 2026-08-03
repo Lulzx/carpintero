@@ -115,12 +115,12 @@ FFI instead, which is worth having and still not the engine:
 | | Corpus scan | |
 | --- | ---: | --- |
 | `scan` | 15.8 s | pure Arturo, the reference |
-| `scanFast` | 0.30 s | the shared library, no change to Arturo |
+| `scanFast` | 0.25 s | the shared library, no change to Arturo |
 | the core on values it already holds | 0.03 s | what direct access would expose |
 
-Most of the middle row is still serialisation: 0.19 seconds to render the
-input against 0.08 to cross the boundary and match, after four rounds of
-making the rendering faster. The measurement, and what it argues, is in
+Most of the middle row is serialisation: 0.19 seconds to render the input
+against 0.045 to cross the boundary and match, after five rounds of making
+the two ends faster. The measurement, and what it argues, is in
 [nim/README.md](nim/README.md).
 
 ## Semantics worth knowing
@@ -154,6 +154,7 @@ scripts/run-tests.sh
 | `tests.art` | 359 checks over the interpreted matcher |
 | `tests-panics.art` | 18 grammar errors, one interpreter each |
 | `nim/tests/test_vm.nim` | 40 checks over the compiled core |
+| `nim/tests/test_wire.nim` | the FFI input read both ways and compared |
 | `nim/tests/differential.nim` | 51 cases run in both engines and compared |
 | `demo.art` | 71 checks, written to be read rather than to cover |
 

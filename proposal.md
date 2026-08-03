@@ -414,18 +414,19 @@ seconds of scanning and the compiled core about 30 milliseconds.
 preference.** The package changes nothing in Arturo, so the only way to
 reach the compiled core from Arturo today is `call.external`, which carries
 scalars. `nim/adapter/fast.art` does exactly that, and it is worth having:
-about fifty times faster than the interpreted matcher over the corpus, with
+about sixty times faster than the interpreted matcher over the corpus, with
 no change to Arturo at all. What it cannot do is expose the engine.
 
 | | Corpus time | |
 | --- | ---: | --- |
 | `scan` | 15.8 s | pure Arturo, the reference |
-| `scanFast` | 0.30 s | the shared library, no change to Arturo |
+| `scanFast` | 0.25 s | the shared library, no change to Arturo |
 | the core on values it already holds | 0.03 s | what direct access would expose |
 
-Four rounds of optimisation took the serialisation from 15.3 seconds to
-0.19, which is enough to answer the obvious objection that the bridge was
-simply written badly. It is still 70% of the middle row, and what is left is
+Five rounds of optimisation took the serialisation from 15.3 seconds to
+0.19 and the call itself from 0.13 to 0.045, which is enough to answer the
+obvious objection that the bridge was simply written badly. Serialising is
+still 78% of the middle row, and what is left is
 not escaping or a wasteful encoding but traversing Arturo's own value tree
 from Arturo and building a second copy of it. A further round would likely
 shave more; it would not change which row the ceiling sits in.
@@ -559,7 +560,7 @@ dialect must agree with the language about what position N means.
   the interpreted semantics by a differential harness rather than by shared
   code. Over Arturo's own source both engines find the same 287 definitions
   in the same 168 files with no disagreement, the interpreted matcher taking
-  15.6 seconds of scanning and the compiled core about 30 milliseconds.
+  15.8 seconds of scanning and the compiled core about 30 milliseconds.
   What remains splits in two. Integration is required and is upstream's:
   `Value` in place of the JSON adapter, escapes calling back into the
   interpreter, and registering the module. Memoization and the charset-run

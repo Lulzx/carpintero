@@ -1,0 +1,26 @@
+;; dump-wire.art — the wire text `scanFast` sends, one input per line.
+;;
+;;     arturo nim/adapter/dump-wire.art ../arturo /tmp/inputs.txt
+;;
+;; `nim/tests/test_wire.nim` reads the file back and checks that the one-pass
+;; reader in `wire.nim` and the `std/json` reader in `load.nim` make the same
+;; `Item`s of every line. The emitter is the only thing that writes this
+;; format, so a corpus of what it actually writes is the honest input for
+;; that comparison.
+import ./"fast.art"!
+
+root: first arg
+files: select list.recursive.relative root 'f -> "art" = last split.by:"." f
+out: []
+i: 0
+n: size files
+while [i < n][
+    blk: []
+    ok: false
+    e: try [ blk: loadSafe root ++ "/" ++ files\[i]  ok: true ]
+    if ok [ out: append out @[{["block",[} ++ (join.with: "," map blk 'e -> emitItem e) ++ "]]"] ]
+    i: i + 1
+]
+NL: to :string to :char 10
+write (join.with: NL out) (last arg)
+print ["wrote" size out "inputs to" last arg]

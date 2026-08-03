@@ -8,4 +8,5 @@ nim/nimcache/
 nim/tests/differential
 nim/tests/dis
 nim/tests/test_vm
+nim/tests/test_wire
 site/
