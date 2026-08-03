@@ -187,6 +187,19 @@ can never match. All loops carry the **progress guard**: an iteration
 that matches without consuming input ends the loop, so nullable loop
 bodies (`some [opt "a"]`) terminate instead of hanging.
 
+The iteration that ends the loop is not taken. Whatever it captured,
+kept or deferred rolls back with it, so a stalled pass leaves nothing
+behind:
+
+```red
+scan "a" [some [capture 'x opt "a"]]
+; => [x: "a"], not [x: ""]
+```
+
+The distinction matters for any loop body that can match empty and also
+capture: without it, the final zero-width pass would overwrite the
+capture the productive pass made.
+
 ### Sequence, choice, grouping
 
 A block is a sequence. `|` separates ordered alternatives. Inside a
@@ -494,6 +507,24 @@ The first version of that grammar consumed the body block along with the
 head, and found 97. Everything else was nested inside a `describe`
 block, another function, or an `if` arm. That is the argument for `into`
 in one number.
+
+### And in the compiled core
+
+The same walk runs in the Nim matcher in [`nim/`](nim/README.md), which
+shares no code with the matcher this manual documents. Both find the same
+287 definitions with the same captures, and no file disagrees:
+
+```
+scripts/differential-corpus.sh ../arturo
+```
+
+That is the strongest form the corpus evidence takes. Everything else here
+compares one implementation against expectations written by the person who
+wrote it; this compares two implementations against each other, so a
+disagreement is a statement about the language rather than about a
+fixture. It has already paid for itself: it caught the compiled core
+matching `'word` against labels and literals, which the interpreted
+matcher does not do.
 
 ### What it costs
 
