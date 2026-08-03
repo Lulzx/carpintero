@@ -1235,18 +1235,60 @@ scan?: function [input rule][
 ;; fixing the language lexer with its own dialect. Newlines are kept,
 ;; so line numbers survive stripping.
 
+;;
+;; Every loop here runs once per character of the input, so this is the
+;; one grammar in the package where the cost of a terminal is worth
+;; caring about. The rule is: a run of ordinary characters must cost one
+;; charset test per character, not a stack of lookaheads.
+;;
+;; The earlier srcPlain read
+;;     some [not quote not brace not apostrophe not semicolon skip]
+;; which is four negative lookaheads and a skip — five rule invocations
+;; for every ordinary character, and ordinary characters are almost all
+;; of any source file. Each of those sets is now the complement of the
+;; characters that end the run, which the matcher settles with a single
+;; lookup in the charset ASCII table. Same language, an order of
+;; magnitude less work; the corpus run in examples proves the two agree
+;; over a megabyte of Arturo's own source.
+
 SRCNL: to :char 10
 SRCBS: to :char 92
 
+;; the four characters that can begin something srcPlain must not eat:
+;; a double quote, an open curly, an apostrophe, a semicolon
+srcOpeners:  charset join @[(to :char 34) (to :char 123) (to :char 39) (to :char 59)]
+srcOrdinary: csComplement srcOpeners
+
+;; inside a double-quoted string, anything but a quote or a backslash;
+;; the backslash is handled by srcEsc, which takes the character after
+;; it whatever that is
+srcInStr: csComplement charset join @[(to :char 34) SRCBS]
+
+;; inside a curly string, anything but a brace either way: an open one
+;; starts a nested string and a close one ends this one
+srcInCurly: csComplement charset join @[(to :char 123) (to :char 125)]
+
+;; a comment runs to the end of the line
+srcInComment: csComplement charset to :string SRCNL
+
+;; the ordinary character leads inside these loops too, for the same
+;; reason it leads at the top: an escape and a nested curly are the rare
+;; cases, and the sets are disjoint, so the order is free to follow the
+;; frequencies.
 srcEsc:     [SRCBS skip]
-srcStr:     [{"} any [srcEsc | not {"} skip] {"}]
-srcCurly:   ["{" any [srcCurly | not "}" skip] "}"]
+srcStr:     [{"} any [srcInStr | srcEsc] {"}]
+srcCurly:   ["{" any [srcInCurly | srcCurly] "}"]
 srcChar:    ["'" not "'" skip "'"]
-srcComment: [";" any [not SRCNL skip]]
-srcPlain:   [some [not {"} not "{" not "'" not ";" skip]]
+srcComment: [";" any srcInComment]
+srcPlain:   [some srcOrdinary]
+
+;; srcPlain leads: it is the arm that matches at most positions, and it
+;; cannot match at any character the other arms want, so putting it
+;; first costs the specials one failed test and saves every run of
+;; ordinary text four.
 srcClean:   [collect 'parts [
-    any [keep srcStr | keep srcCurly | keep srcChar | srcComment
-        | keep srcPlain | keep skip]
+    any [keep srcPlain | keep srcStr | keep srcCurly | keep srcChar
+        | srcComment | keep skip]
 ]]
 
 ;; source string in, source string without comments out

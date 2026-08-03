@@ -21,8 +21,11 @@
 ;; lines and covers three of the four ways Arturo spells a function
 ;; definition; the run reports what it found and what it could not.
 ;;
-;; Expect a couple of minutes: the interpreted matcher moves at
-;; roughly 8 KB of source per second, and this is 1 MB of it.
+;; Expect about half a minute for the megabyte. Roughly a third of that
+;; is stripComments, character-level matching over the whole input,
+;; which is the worst case for an interpreted matcher; the rest is the
+;; tree walk. Lexing every file twice is free by comparison — that part
+;; is the interpreter's own lexer, in native code.
 
 import ./"../carpintero.art"!
 
@@ -46,10 +49,6 @@ defn: [
     capture 'params :block
 ]
 
-;; ahead :block classifies without consuming: a definition whose body is
-;; a block, versus one whose body is the expression after ->.
-withBody: [defn ahead :block]
-
 ;; The walk is the rule that makes this a block grammar rather than a
 ;; text search: at every element, try the pattern, else descend into it
 ;; if it is a block, else step over it. into recurses through the whole
@@ -60,11 +59,31 @@ withBody: [defn ahead :block]
 ;; inside itself would open a fresh collection at every level and the
 ;; inner keeps would never reach the outer one. So the collect wraps the
 ;; walk once, from outside, and the walk recurses under it.
-allWalk:  [any [keep defn     | into allWalk | skip]]
-blkWalk:  [any [keep withBody | into blkWalk | skip]]
+;;
+;; The two arms differ only in ahead :block, which asks whether a body
+;; block follows without consuming it — that is, whether this definition
+;; is block-bodied or has an expression after ->. Both arms keep, so
+;; found accumulates every definition either way; the defers are what
+;; tell the two apart, and they are the reason this is one walk instead
+;; of two. A defer runs exactly once, only if the whole scan succeeds,
+;; and rolls back with a dead branch, so it counts what actually
+;; matched — which a do escape, free to run on abandoned paths, could
+;; not. Counting into a dictionary rather than a plain variable is
+;; deliberate: an escape block assigns in a scope of its own, so a path
+;; assignment into a value that already exists is what survives it.
+TALLY: #[blk: 0 arr: 0]
 
-allDefns: [collect 'found allWalk]
-blkDefns: [collect 'found blkWalk]
+;; defn is attempted once per position, and the classification hangs off
+;; the end of the same arm. Writing it as two arms that each begin with
+;; defn would re-try it at every element that is not a definition, which
+;; is almost all of them — and on a megabyte of source that costs about
+;; as much as walking the tree twice, which is what this replaced.
+walk: [any [ keep defn [ahead :block defer [TALLY\blk: TALLY\blk + 1]
+                       |             defer [TALLY\arr: TALLY\arr + 1]]
+           | into walk
+           | skip ]]
+
+allDefns: [collect 'found walk]
 
 ;; ── the corpus ───────────────────────────────────────────────────────
 
@@ -83,8 +102,6 @@ nbytes:   0
 nOk:      0        ; stripped source lexes to the same block as the raw source
 nBoth:    []       ; neither form lexes — the file is not valid on its own
 nDiffer:  []       ; the two blocks compare unequal
-nDefns:   0
-nArrow:   0
 biggest:  ["" 0]
 
 loop files 'f [
@@ -113,11 +130,9 @@ loop files 'f [
                    -> 'nDiffer ++ f
 
         ; The definition grammar runs on the stripped block, which is the
-        ; one guaranteed to exist.
+        ; one guaranteed to exist. One walk per file: the running totals
+        ; live in TALLY, which the defers in the grammar keep.
         a: scan sb allDefns
-        d: scan sb blkDefns
-        nDefns: nDefns + size d\found
-        nArrow: nArrow + ((size a\found) - size d\found)
 
         if (size a\found) > last biggest -> biggest: @[f, size a\found]
     ]
@@ -131,7 +146,7 @@ loop nBoth 'f -> print ["                  " f]
 print ["compared unequal " (size nDiffer)]
 loop nDiffer 'f -> print ["                  " f]
 print ""
-print ["definitions found" nDefns "block-bodied," nArrow "arrow-bodied"]
+print ["definitions found" TALLY\blk "block-bodied," TALLY\arr "arrow-bodied"]
 print ["densest file     " (first biggest) "with" (last biggest) "definitions"]
 
 unless empty? nDiffer [

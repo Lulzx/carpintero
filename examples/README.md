@@ -26,9 +26,11 @@ git clone --depth 1 https://github.com/arturo-lang/arturo
 arturo examples/arturo-corpus.art ./arturo
 ```
 
-Budget a couple of minutes. The interpreted matcher moves at roughly
-8 KB of source per second and the corpus is about a megabyte, most of
-it spent in `stripComments`, which is the part being tested.
+Budget about half a minute for the megabyte — roughly a third of it in
+`stripComments`, the rest in the tree walk. Both were several times
+slower until the grammars were tuned; the
+[write-up](../MANUAL.md#what-it-costs) has the before-and-after and the
+two rules of thumb behind it.
 
 The run reports four things: how many files the stripper rewrote without
 changing the program the lexer builds, how many never lexed in either

@@ -310,6 +310,20 @@ freely. The matcher pads each block with a trailing value before
 evaluation, which sidesteps an interpreter bug (see
 [bugs/](bugs/README.md)).
 
+An escape block evaluates in a scope of its own, so a plain assignment
+inside one does not reach a variable outside it. To accumulate across a
+scan, mutate a value that already exists — a **path assignment into a
+dictionary** is the reliable form:
+
+```red
+TALLY: #[n: 0]
+rule: [some [item defer [TALLY\n: TALLY\n + 1]]]   ; works
+rule: [some [item defer [n: n + 1]]]               ; does not accumulate
+```
+
+`examples/arturo-corpus.art` counts two kinds of definition in one pass
+this way.
+
 ## Grammar hygiene, checked for you
 
 Before matching, once per rule set (cached, keyed by the rule and every
@@ -373,6 +387,13 @@ alternation of literals, since a charset is one table lookup;
 and reach for `scan.memo` only for a rule that is genuinely re-tried
 at the same position, because the table costs more than it saves
 otherwise.
+
+Two of those are not hypothetical: replacing a stack of negative
+lookaheads with one complement charset made `stripComments` an order of
+magnitude faster, and factoring a shared prefix out of two alternatives
+so it is attempted once cut a tree walk by a third. Both are written up
+with the numbers under
+[Validation](#what-it-costs).
 
 ## PEG pitfalls, and their idiomatic fixes
 
@@ -476,11 +497,52 @@ in one number.
 
 ### What it costs
 
-About two and a half minutes for the megabyte, roughly 8 KB of source
-per second, nearly all of it in `stripComments` — which is character-level
-matching over the whole input, the worst case for an interpreted matcher.
-The block-grammar half runs on already-lexed structure and is
-comparatively free. See [Performance expectations](#performance-expectations).
+About **26 seconds** for the megabyte, of which `stripComments` is 9.5 —
+the rest is the tree walk. Lexing every file twice, which the run also
+does, is free at this resolution: it is the interpreter's own lexer, in
+native code.
+
+Both halves started out much worse, and the two fixes are the general
+lesson about writing grammars for an interpreted matcher, so they are
+worth stating plainly.
+
+`stripComments` ran at 8–10 KB/s and now runs at **70–120 KB/s**. The
+old rule for a run of ordinary characters was
+
+```red
+srcPlain: [some [not {"} not "{" not "'" not ";" skip]]
+```
+
+— four negative lookaheads and a `skip`, five rule invocations for every
+ordinary character, and ordinary characters are almost all of any source
+file. It is now `[some srcOrdinary]`, where `srcOrdinary` is the
+complement charset of those four characters, which the matcher settles
+with one lookup in the charset's ASCII table. Same language accepted,
+byte-identical output over the whole corpus, an order of magnitude less
+work.
+
+The tree walk was two passes, one for all definitions and one for the
+block-bodied ones. Collapsing them into a single pass — `defer` counting
+each kind as it commits — is worth less than it looks if you write it as
+
+```red
+walk: [any [keep [defn ahead :block] defer [...]
+          | keep defn                defer [...] | into walk | skip]]
+```
+
+because every element that is *not* a definition, which is almost all of
+them, tries `defn` twice. Factoring the shared prefix out so `defn` is
+attempted once, with the classification hanging off the end of the same
+arm, is what actually pays:
+
+```red
+walk: [any [keep defn [ahead :block defer [...] | defer [...]]
+          | into walk | skip]]
+```
+
+Both fixes are the same idea in different clothing: **make the common
+path cheap, and never test the same thing twice at one position.** See
+[Performance expectations](#performance-expectations).
 
 ## Differences from Rebol/Red PARSE
 
