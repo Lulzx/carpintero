@@ -412,10 +412,11 @@ of scanning and the compiled core 28 milliseconds.
 **It has to be a builtin, and that is a measured claim rather than a
 preference.** The package changes nothing in Arturo, so the only way to
 reach the compiled core from Arturo today is `call.external`, which carries
-scalars. Sending a lexed file across that boundary costs 2.3 seconds of the
-interpreter's time to render, against 0.09 seconds to cross and match, and
-that is after two rounds of optimisation took the rendering down from 15.3.
-Serialisation is 96% of the bridge and the engine is not the bottleneck: an
+scalars. Sending a lexed file across that boundary costs 1.5 seconds of the
+interpreter's time to render, against 0.08 seconds to cross and match, and
+that is after three rounds of optimisation took the rendering down from
+15.3. Serialisation is 95% of the bridge and the engine is not the
+bottleneck: an
 extension API that serialises cannot expose this, and a builtin holding the
 `Value` block it was handed does not have to. What
 that asks for upstream is a `src/library/Parse.nim` and a line in

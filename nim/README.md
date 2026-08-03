@@ -114,29 +114,42 @@ models opaquely survive untouched.
 
 ### What that costs, and what it argues
 
-Over the corpus `scanFast` takes 2.3 seconds against `scan`'s 22.6, so about
-nine and a half times. `adapter/breakdown.art` says where the 2.3 goes:
+Over the corpus `scanFast` takes 1.7 seconds against `scan`'s 22.6, about
+thirteen times. `adapter/breakdown.art` says where the 1.7 goes:
 
 | Stage | Time |
 | --- | --- |
-| `emitItem`, Arturo values straight to text | 2.29 s |
-| the call itself, JSON parsing and matching included | 0.09 s |
+| `emitItem`, Arturo values straight to text | 1.52 s |
+| the call itself, JSON parsing and matching included | 0.08 s |
 
-The first version of this was fifteen times slower, and two changes account
-for it. Escaping ran as an interpreted loop over characters, at about 2.5
-microseconds each; `replace` scans in native code and is flat in the length
-of the string, which at 1600 characters is 1.7 milliseconds against 1011.
-And the input went through the tagged dictionaries `itemTree` builds, only
-to be walked again to make text, so it now goes straight to text in a
-two-element array with the type compared as a type rather than stringified
-per element. Together: 15.3 seconds down to 2.3.
+The first version took 15.3 seconds to serialise, and three changes account
+for the difference.
+
+Escaping ran as an interpreted loop over characters, at about 2.5
+microseconds each. `replace` scans in native code and is flat in the length
+of the string: at 1600 characters the loop takes 1011 milliseconds per 200
+calls and the replaces take 1.7.
+
+The input went through the tagged dictionaries `itemTree` builds, only to be
+walked a second time to make text. It goes straight to text now, in a
+two-element array rather than an object, with the type compared as a type
+instead of stringified per element.
+
+And most values need no escaping at all, so the escaper starts with one
+native test and returns the string untouched when it passes. Words, labels,
+symbols and literals come from the lexer and in practice never carry a
+quote or a backslash, which over Arturo's own source is 80,403 of them and
+none needing an escape, so those are guarded by two `contains?` rather than
+the regex the general path uses. That guard costs about 8% and is what keeps
+the fast path from being an assumption.
 
 What did not move is the part that matters. The call, JSON parsing and
-matching included, costs 89 milliseconds, and the compiled core scans the
+matching included, costs 80 milliseconds, and the compiled core scans the
 same corpus in 28 when handed values it already holds. Serialisation is
-still 96% of the bridge, and the remaining cost is not a slow escaper or a
-wasteful encoding, it is that the values have to be walked and rendered in
-Arturo at all.
+still 95% of the bridge. What is left is not a slow escaper or a wasteful
+encoding, since those are gone: it is roughly 16 microseconds per value
+spent calling a function in Arturo and building a frame for it, and the
+only way to not pay it is to not walk the values in Arturo.
 
 That is the argument for a builtin rather than a bridge, and it is the one
 thing an FFI experiment can establish that a benchmark cannot. A builtin
