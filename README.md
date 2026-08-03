@@ -114,12 +114,12 @@ FFI instead, which is worth having and still not the engine:
 
 | | Corpus scan | |
 | --- | ---: | --- |
-| `scan` | 15.6 s | pure Arturo, the reference |
-| `scanFast` | 1.65 s | the shared library, no change to Arturo |
+| `scan` | 15.8 s | pure Arturo, the reference |
+| `scanFast` | 0.30 s | the shared library, no change to Arturo |
 | the core on values it already holds | 0.03 s | what direct access would expose |
 
-Almost all of the middle row is serialisation: 1.5 seconds to render the
-input against 0.08 to cross the boundary and match, after three rounds of
+Most of the middle row is still serialisation: 0.19 seconds to render the
+input against 0.08 to cross the boundary and match, after four rounds of
 making the rendering faster. The measurement, and what it argues, is in
 [nim/README.md](nim/README.md).
 

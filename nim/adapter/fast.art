@@ -72,17 +72,27 @@ jsonEscapeSlow: function [s][
     join out
 ]
 
-jsonEscape: function [s][
-    ; most strings need nothing done to them, and one native test is much
-    ; cheaper than five native passes
-    unless match? s DIRTY -> return s
-    if match? s CTRL -> return jsonEscapeSlow s
+jsonEscapePasses: function [s][
     ; backslash first, or it doubles what the later passes introduce
     r: replace s SJB SJB ++ SJB
     r: replace r SJQ SJB ++ SJQ
     r: replace r SNL SJB ++ "n"
     r: replace r STB SJB ++ "t"
     replace r SCR SJB ++ "r"
+]
+
+;; A function whose body assigns anything pays for a scope, about 7
+;; microseconds, and it pays whether or not the assignment is reached: an
+;; assignment behind an early return costs the same as one on every path.
+;; This is called once per string in the corpus and nearly always returns at
+;; the first test, so the two branches that need locals live elsewhere and
+;; this body assigns nothing.
+jsonEscape: function [s][
+    ; most strings need nothing done to them, and one native test is much
+    ; cheaper than five native passes
+    unless match? s DIRTY -> return s
+    if match? s CTRL -> return jsonEscapeSlow s
+    jsonEscapePasses s
 ]
 
 jsonString: function [v][
@@ -115,8 +125,9 @@ jsonString: function [v][
 ;; tagged dictionaries `itemTree` builds. Walking the Arturo value once and
 ;; emitting text directly skips building a tree only to walk it again, and a
 ;; two-element array costs fewer characters and fewer joins than an object
-;; with named fields. Over Arturo's own source the pair is worth about five
-;; times: 9.5 seconds for `itemTree` plus `jsonString`, 2.0 for this.
+;; with named fields. Over Arturo's own source the pair is worth about
+;; twenty-eight times: 5.3 seconds for `itemTree` plus `jsonString`, 0.19
+;; for this.
 ;;
 ;; Types are compared as type values rather than stringified per node, since
 ;; `to :string type v` is a conversion for every element in the corpus.
@@ -150,38 +161,96 @@ escIdent: function [s][
     s
 ]
 
-emitItem: function [v][
-    t: type v
-    if t = TWORD  -> return join @[{["w","} (escIdent to :string v) {"]}]
-    if t = TSTR   -> return join @[{["s","} (jsonEscape v) {"]}]
-    if t = TBLOCK -> return join @[{["b",[} (join.with: "," map v 'e -> emitItem e) "]]"]
-    if t = TSYM   -> return join @[{["y","} (escIdent to :string v) {"]}]
-    if t = TLABEL -> return join @[{["l","} (escIdent to :string v) {"]}]
-    if t = TINT   -> return join @[{["i",} (to :string v) "]"]
-    if t = TLIT   -> return join @[{["t","} (escIdent to :string v) {"]}]
-    if t = TTYPE  -> return join @[{["T",":} (to :string v) {"]}]
-    if t = TCHAR  -> return join @[{["c",} (to :string to :integer v) "]"]
-    if t = TSYML  -> return join @[{["q","} (escIdent to :string v) {"]}]
-    if t = TFLOAT -> return join @[{["f",} (to :string v) "]"]
-    if t = TLOG   -> return join @[{["g",} ((v)? -> "true" -> "false") "]"]
-    if t = TNULL  -> return {["n",""]}
-    if t = TDICT [
-        ks: keys v
-        parts: []
-        i: 0
-        n: size ks
-        while [i < n][
-            k: ks\[i]
-            parts: append parts @[join @["[" (qs k) "," (emitItem v\[k]) "]"]]
-            i: i + 1
-        ]
-        return join @[{["d",[} (join.with: "," parts) "]]"]
+emitDict: function [v][
+    ks: keys v
+    parts: []
+    i: 0
+    n: size ks
+    while [i < n][
+        k: ks\[i]
+        parts: append parts @["[" ++ (qs k) ++ "," ++ (emitItem v\[k]) ++ "]"]
+        i: i + 1
     ]
-    ; everything else crosses as an opaque leaf: a tag and whatever
-    ; rendering the type has, which some of them do not
+    {["d",[} ++ (join.with: "," parts) ++ "]]"
+]
+
+;; everything else crosses as an opaque leaf: a tag and whatever rendering
+;; the type has, which some of them do not. A sixth of the corpus arrives
+;; here, so guarding every one of them with a `try` costs a scope apiece.
+;;
+;; Four kinds refuse `to :string` on 0.10.0, and they are known by name
+;; rather than discovered by catching: `:inline`, `:path`, `:pathlabel` and
+;; `:pathliteral`. They cross with an empty rendering, which is what the
+;; caught version produced for them anyway.
+NOSTR: #[]
+loop ["inline" "path" "pathlabel" "pathliteral"] 'k -> NOSTR\[to :type k]: true
+
+;; A kind that is not on that list and still refuses is a version of Arturo
+;; this list has not met. `emitInput` catches that, turns this flag on, and
+;; emits the whole input again through the guarded form, so the list being
+;; incomplete costs one re-emission rather than a failed scan.
+OPQ: #[safe: false]
+
+emitOpaqueSafe: function [v][
     r: ""
     e: try [ r: to :string v ]
-    join @[{["o",} (qs to :string t) "," (qs r) "]"]
+    {["o",} ++ (qs to :string type v) ++ "," ++ (qs r) ++ "]"
+]
+
+emitOpaque: function [v][
+    if OPQ\safe -> return emitOpaqueSafe v
+    if key? NOSTR type v -> return {["o",} ++ (qs to :string type v) ++ {,""]}
+    {["o",} ++ (qs to :string type v) ++ "," ++ (qs to :string v) ++ "]"
+]
+
+;; Nothing here is assigned to a local, and the type is re-read per test
+;; rather than held in one. The two are the same trade: a body that assigns
+;; costs a scope, about 7 microseconds a call, while `type v` costs about
+;; eight nanoseconds, so fourteen of them are still four hundred times
+;; cheaper than the local that would have saved them. The dictionary and
+;; opaque cases need locals and are rare, so they are functions of their own
+;; and pay the scope only when they are reached.
+;;
+;; An identifier's text is the whole of what it emits, so the same word
+;; emits the same JSON every time it appears. Arturo's own source holds
+;; 45,487 words and 911 distinct ones, and 28,758 symbols and 91 distinct
+;; ones, so emitting each spelling once and remembering it removes most of
+;; the work. A word is usable as a dictionary key directly, which is why
+;; there is no conversion here. One cache per kind, because a label and a
+;; word spelled alike would key alike and emit differently.
+WCACHE: #[]
+YCACHE: #[]
+LCACHE: #[]
+QCACHE: #[]
+
+emitItem: function [v][
+    if (type v) = TWORD [
+        unless key? WCACHE v [ WCACHE\[v]: {["w","} ++ (escIdent to :string v) ++ {"]} ]
+        return WCACHE\[v]
+    ]
+    if (type v) = TSTR   -> return {["s","} ++ (jsonEscape v) ++ {"]}
+    if (type v) = TBLOCK -> return {["b",[} ++ (join.with: "," map v 'e -> emitItem e) ++ "]]"
+    if (type v) = TSYM [
+        unless key? YCACHE v [ YCACHE\[v]: {["y","} ++ (escIdent to :string v) ++ {"]} ]
+        return YCACHE\[v]
+    ]
+    if (type v) = TLABEL [
+        unless key? LCACHE v [ LCACHE\[v]: {["l","} ++ (escIdent to :string v) ++ {"]} ]
+        return LCACHE\[v]
+    ]
+    if (type v) = TINT   -> return {["i",} ++ (to :string v) ++ "]"
+    if (type v) = TLIT [
+        unless key? QCACHE v [ QCACHE\[v]: {["t","} ++ (escIdent to :string v) ++ {"]} ]
+        return QCACHE\[v]
+    ]
+    if (type v) = TTYPE  -> return {["T",":} ++ (to :string v) ++ {"]}
+    if (type v) = TCHAR  -> return {["c",} ++ (to :string to :integer v) ++ "]"
+    if (type v) = TSYML  -> return {["q","} ++ (escIdent to :string v) ++ {"]}
+    if (type v) = TFLOAT -> return {["f",} ++ (to :string v) ++ "]"
+    if (type v) = TLOG   -> return {["g",} ++ ((v)? -> "true" -> "false") ++ "]"
+    if (type v) = TNULL  -> return {["n",""]}
+    if (type v) = TDICT  -> return emitDict v
+    emitOpaque v
 ]
 
 ;; ── the library ──────────────────────────────────────────────────────
@@ -229,11 +298,21 @@ spanValue: function [input isblk span][
     slice src f t - 1
 ]
 
+emitInput: function [input isblk][
+    (isblk)? -> {["block",[} ++ (join.with: "," map input 'e -> emitItem e) ++ "]]"
+             -> {["text",} ++ (SJQ ++ (jsonEscape input) ++ SJQ) ++ "]"
+]
+
 ;; scanFast: the contract scan has, a dictionary of captures or null.
 scanFast: function [input rule][
     isblk: block? input
-    inp: (isblk)? -> {["block",[} ++ (join.with: "," map input 'e -> emitItem e) ++ "]]"
-                  -> {["text",} ++ (SJQ ++ (jsonEscape input) ++ SJQ) ++ "]"
+    inp: ""
+    ; the only way this fails is a kind NOSTR has not met; see there
+    err: try [ inp: emitInput input isblk ]
+    unless null? err [
+        OPQ\safe: true
+        inp: emitInput input isblk
+    ]
 
     reply: call.external: carpinteroLib
                 .expect: :string

@@ -407,29 +407,28 @@ dependencies, plus 290 more for the JSON bridge that a builtin would not
 need. It matches text and blocks, and is held to the interpreted semantics
 by running the same grammar over the same input in both engines rather than
 by sharing code. Over Arturo's own source the two agree on every one of 168
-files and find the same 287 definitions, the interpreted matcher taking 15.6
+files and find the same 287 definitions, the interpreted matcher taking 15.8
 seconds of scanning and the compiled core about 30 milliseconds.
 
 **It has to be a builtin, and that is a measured claim rather than a
 preference.** The package changes nothing in Arturo, so the only way to
 reach the compiled core from Arturo today is `call.external`, which carries
 scalars. `nim/adapter/fast.art` does exactly that, and it is worth having:
-about nine and a half times faster than the interpreted matcher over the
-corpus, with no change to Arturo at all. What it cannot do is expose the
-engine.
+about fifty times faster than the interpreted matcher over the corpus, with
+no change to Arturo at all. What it cannot do is expose the engine.
 
 | | Corpus time | |
 | --- | ---: | --- |
-| `scan` | 15.6 s | pure Arturo, the reference |
-| `scanFast` | 1.65 s | the shared library, no change to Arturo |
+| `scan` | 15.8 s | pure Arturo, the reference |
+| `scanFast` | 0.30 s | the shared library, no change to Arturo |
 | the core on values it already holds | 0.03 s | what direct access would expose |
 
-Three rounds of optimisation took the serialisation from 15.3 seconds to
-1.5, which is enough to answer the obvious objection that the bridge was
-simply written badly. It still accounts for 95% of the middle row, and what
-is left is not escaping or a wasteful encoding but traversing Arturo's own
-value tree from Arturo and building a second copy of it. A further round
-would likely shave more; it would not change which row the ceiling sits in.
+Four rounds of optimisation took the serialisation from 15.3 seconds to
+0.19, which is enough to answer the obvious objection that the bridge was
+simply written badly. It is still 70% of the middle row, and what is left is
+not escaping or a wasteful encoding but traversing Arturo's own value tree
+from Arturo and building a second copy of it. A further round would likely
+shave more; it would not change which row the ceiling sits in.
 An extension API that serialises accelerates the reference implementation.
 A builtin holding the `Value` block it was handed is the third row. What
 that asks for upstream is a `src/library/Parse.nim` and a line in

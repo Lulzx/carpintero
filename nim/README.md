@@ -114,19 +114,19 @@ models opaquely survive untouched.
 
 ### What that costs, and what it argues
 
-Over the corpus `scanFast` takes 1.65 seconds against `scan`'s 15.6, about
-nine and a half times. Each is timed in its own process, which matters:
-measured in one process that runs both, `scan` reports 22.5 seconds rather
-than 15.6 while `scanFast` reports the same 1.65, so the same-process ratio
-flatters the bridge by about 40%. The isolated pair is the honest one.
-`adapter/breakdown.art` says where the 1.65 goes:
+Over the corpus `scanFast` takes 0.30 seconds against `scan`'s 15.8, about
+fifty times. Each is timed in its own process, which matters: measured in
+one process that runs both, `scan` reports 22.5 seconds rather than 15.8
+while `scanFast` reports the same 0.30, so the same-process ratio flatters
+the bridge by about 40%. The isolated pair is the honest one.
+`adapter/breakdown.art` says where the 0.30 goes:
 
 | Stage | Time |
 | --- | --- |
-| `emitItem`, Arturo values straight to text | 1.52 s |
+| `emitItem`, Arturo values straight to text | 0.19 s |
 | the call itself, JSON parsing and matching included | 0.08 s |
 
-The first version took 15.3 seconds to serialise, and three changes account
+The first version took 15.3 seconds to serialise, and four changes account
 for the difference.
 
 Escaping ran as an interpreted loop over characters, at about 2.5
@@ -139,28 +139,53 @@ walked a second time to make text. It goes straight to text now, in a
 two-element array rather than an object, with the type compared as a type
 instead of stringified per element.
 
-And most values need no escaping at all, so the escaper starts with one
-native test and returns the string untouched when it passes. Words, labels,
-symbols and literals come from the lexer and in practice never carry a
-quote or a backslash, which over Arturo's own source is 80,403 of them and
-none needing an escape, so those are guarded by two `contains?` rather than
-the regex the general path uses. That guard costs about 8% and is what keeps
-the fast path from being an assumption.
+Most values need no escaping at all, so the escaper starts with one native
+test and returns the string untouched when it passes. Words, labels, symbols
+and literals come from the lexer and in practice never carry a quote or a
+backslash, which over Arturo's own source is 80,403 of them and none needing
+an escape, so those are guarded by two `contains?` rather than the regex the
+general path uses. That guard costs about 8% and is what keeps the fast path
+from being an assumption.
+
+The fourth round is about frames rather than text, and it is most of the
+way from 1.5 seconds to 0.19. A function whose body assigns anything costs
+about 7.3 microseconds a call in Arturo 0.10.0, against 0.3 for one that
+assigns nothing, and it costs that whether or not the assignment runs: an
+assignment sitting behind an early return is paid for on every call that
+returns early. `emitItem` held the value's type in a local and had the
+dictionary and opaque cases inline, so all three of those assignments were
+charged to all 138,393 values in the corpus. It now assigns nothing: the
+type is re-read for each test, at 0.085 microseconds a test against 7.3 for
+the local that would have saved fourteen of them, and the two branches that
+need locals are separate functions that pay a scope only when reached. A
+sixth of the corpus is kinds the matcher models opaquely, and those went
+through a `try` for a rendering, so the four kinds Arturo will not render as
+a string are named instead. If a kind not on that list ever refuses,
+`emitInput` catches it and re-emits the whole input through the guarded
+form, so the list being incomplete costs a re-emission rather than a failed
+scan.
+
+The same round added a cache per identifier kind. An identifier's text is
+the whole of what it emits, and Arturo's own source holds 45,487 words with
+911 distinct spellings and 28,758 symbols with 91, so each spelling is
+emitted once and looked up afterwards. That is worth about 17%. The emitter
+was checked by hashing everything it produces over the whole corpus before
+and after: the output is byte for byte what it was.
 
 What did not move is the part that matters. The call, JSON parsing and
 matching included, costs 80 milliseconds, and the compiled core scans the
-same corpus in about 30 when handed values it already holds. Serialisation is
-still 95% of the bridge.
+same corpus in about 30 when handed values it already holds. Serialisation
+is 70% of the bridge, down from 95%.
 
-What changed is what that 95% is made of. It is no longer escaping or a
-redundant encoding, which is what the three rounds removed. It is now
-traversing Arturo's existing value tree from Arturo and building a second
-representation of it, which on this corpus and this emitter works out at
-roughly 16 microseconds a value. Another round would probably find
-something (an iterative walk, fewer frames, a buffer API rather than
-strings), so this is not a floor. It is a change of kind: the remaining
-cost belongs to walking and rebuilding the values, not to how they are
-written down.
+What changed is what that 70% is made of. It is no longer escaping, a
+redundant encoding, or scopes created for locals nobody needed, which is
+what the four rounds removed. It is now traversing Arturo's existing value
+tree from Arturo and building a second representation of it, which on this
+corpus and this emitter works out at roughly 1.3 microseconds a value.
+Another round would probably find something (an iterative walk, a buffer API
+rather than strings), so this is not a floor. It is a change of kind: the
+remaining cost belongs to walking and rebuilding the values, not to how they
+are written down.
 
 That is the argument for a builtin rather than a bridge, and it is the one
 thing an FFI experiment can establish that a benchmark cannot. Three modes,
@@ -168,8 +193,8 @@ same grammar, same corpus, same 287 definitions:
 
 | | Corpus time | |
 | --- | ---: | --- |
-| `scan` | 15.6 s | pure Arturo, the reference |
-| `scanFast` | 1.65 s | the shared library, no change to Arturo |
+| `scan` | 15.8 s | pure Arturo, the reference |
+| `scanFast` | 0.30 s | the shared library, no change to Arturo |
 | the core on values it already holds | 0.03 s | what direct access would expose |
 
 A builtin would take the `Value` block it was handed and match on it in
