@@ -1,83 +1,104 @@
 # [Draft issue for arturo-lang/arturo]
 
-**Title:** `do` of a block whose last expression produces no value corrupts the enclosing frame
+**Title:** Binding the result of an expression that produces no value exits 1 silently
 
 **Body:**
 
 ## Describe the bug
 
-`do` of a block whose **last expression produces no value** leaves the
-enclosing frame expecting one, and the interpreter exits 1 silently: no
-output, no error message. A plain assignment (`x: 3`), a path assignment
-(`G\n: 3`), a `set` call, and a call to a function whose own body ends
-value-less all leave a block value-less.
+An assignment whose right-hand side produces no value corrupts the
+enclosing frame, and the interpreter exits 1: no output, no error message,
+no traceback. Leaving the same expression unbound is fine.
 
-Whether it crashes is contextual, which is why one shape can look like
-several bugs: the first repro below needs the `do`-executing function to
-be called from another function, and the second crashes at top level.
-Blocks ending in an ordinary expression work at any depth. Arity is not
-the discriminator either, since the arity-1 `bad` in the second repro
-fails while the arity-1 `good` beside it does not.
-
-## To reproduce
+Two statements are enough, with no block, no `do` and no function in
+sight:
 
 ```arturo
-h1: function [b][
-    res: do b
-    res
-]
-h0: function [b][
-    r: h1 b
-    r
-]
-
-print h0 [1 + 1]
-
-G: #[n: 0]
-print h0 [G\n: 3]
+print "before"
+y: print "hi"
 print "never reached"
 ```
 
-Actual output: `2`, then silent exit 1.
-Removing the `h0` wrapper (calling `h1` directly from top level) makes the
-same `do` succeed.
+Actual output: `before`, `hi`, then silent exit 1.
+
+`print` is standing in for any expression that yields nothing. The same
+crash arrives through every other route to a value-less right-hand side.
+
+## The other faces
+
+Each of these is the one rule above, wearing different clothes. Each
+exits 1 silently on the last line shown.
+
+A `do` of a block whose last expression is an assignment:
+
+```arturo
+G: #[n: 0]
+res: do [G\n: 3]           ; crashes
+do [G\n: 3]                ; fine, unbound
+```
+
+A call to a function whose own body ends in an assignment, so the call
+itself produces nothing:
+
+```arturo
+G: #[n: 0]
+bad: function [n][ G\n: G\n + n ]
+
+bad 1                      ; fine, unbound
+y: bad 1                   ; crashes
+```
+
+And `discard`, which produces no value of its own:
+
+```arturo
+r: discard do blk ++ [true]   ; crashes
+discard do blk ++ [true]      ; fine, unbound
+```
+
+`bugs/valueless-assignment.art` in the report below is the two-statement
+form, with the value-ful control beside it.
+
+## What is *not* the trigger
+
+Worth stating, because this bug wears enough disguises to look like
+several, and we chased two of them a long way before finding the rule:
+
+- **`do` is not required.** `y: print "hi"` has no block in it.
+- **Function nesting is not required.** All of the above crash at top
+  level, in a file with no user-defined function at all.
+- **Arity is not the discriminator.** `bad` and a value-returning
+  function of the same arity behave differently.
+- **It is not contextual.** Every case we found that looked
+  depth-dependent or position-dependent turned out to be the presence or
+  absence of a binding.
 
 ## Expected behavior
 
-Prints `2`, then `3`, then `never reached`.
-
-## A second shape of the same crash
-
-The nesting is not required if the assignment hides inside a called
-function: `do` of a block that calls a function whose *body ends with an
-assignment* crashes even at top level. Making that function return a value
-after the assignment fixes it.
-
-```arturo
-G: #[n: 0]
-bad:  function [x][ G\n: G\n + x ]
-good: function [x][ G\n: G\n + x  x ]
-
-r1: do [good 1]
-print "good survives"
-r2: do [bad 1]
-print "never reached"
-```
-
-Actual output: `good survives`, then silent exit 1.
+Binding a value-less expression should either bind `null` or raise a
+catchable error naming the problem. A silent `exit 1` with no diagnostic
+is the worst of the three, since nothing in the output points at the
+offending line.
 
 ## A reliable workaround
 
-Padding the block with a trailing value before evaluation makes both
-shapes above work, at any depth tested:
+Do not bind the result. Where a value is genuinely wanted, pad the
+expression so that it produces one. For `do` of an arbitrary block:
 
 ```arturo
 discard do blk ++ [true]
 ```
 
-Discard that result rather than binding it. `res: discard do blk ++
-[true]` reintroduces the bug, since `discard` produces no value of its
-own and so leaves the assignment with the same value-less tail.
+Note that `res: discard do blk ++ [true]` reintroduces the crash, since
+`discard` is itself value-less: the padding fixes the block, and dropping
+the binding fixes the statement. Both are needed.
+
+## Possibly related
+
+This may share a root with the argument-stream leak reported separately
+(a discarded call result landing in an enclosing call's argument slot).
+Both are the value stream losing sync around an expression that yields
+nothing, in opposite directions: there a value appears where none was
+wanted, here none appears where one was.
 
 ## Environment
 
@@ -86,5 +107,5 @@ own and so leaves the assignment with the same value-less tail.
 ## Context
 
 Found while implementing a host-code escape in a pure-Arturo parsing
-package, which now pads every escape block this way (`discard do op ++
-[true]`), so escapes may assign freely.
+package, which now pads every escape block and discards the result
+(`discard do op ++ [true]`), so escapes may assign freely.

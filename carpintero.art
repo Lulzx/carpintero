@@ -646,9 +646,10 @@ matchElem: function [items idx pos][
         if k = 15 [
             op: items\[idx + 1]
             unless block? op -> panic "carpintero: do expects a block of host code"
-            ; padded with a trailing value before evaluation: do of a
-            ; block whose last expression produces no value corrupts
-            ; the enclosing frame — see bugs, do-assignment-crash.
+            ; padded with a trailing value before evaluation: binding a
+            ; value-less expression corrupts the enclosing frame, and
+            ; discard's argument slot is a binding — see bugs,
+            ; valueless-assignment.
             ; With the padding, escape blocks may assign, mutate via
             ; set, or call zero-arity functions freely.
             discard do op ++ [true]
@@ -1300,8 +1301,9 @@ stripComments: function [src][
 ;; path in, lexed block out; evaluate it with do at top level, where
 ;; definitions bind globally. Files whose comments would hang or
 ;; confuse the interpreter load correctly through here. The block is
-;; padded with a trailing true so do never sees a value-less tail —
-;; the do result is the padding, not the file's last value.
+;; padded with a trailing true so the do always produces a value, since
+;; binding a value-less one corrupts the frame — the do result is the
+;; padding, not the file's last value.
 loadSafe: function [path][
     to :block (stripComments read path) ++ " true"
 ]

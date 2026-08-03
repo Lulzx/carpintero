@@ -368,14 +368,15 @@ interpreter bugs worth filing upstream, which is what dogfooding is for
 (minimal repros in `bugs/`): the 0.10.0 lexer does not fully ignore comment
 contents (a `\-` inside a comment hangs it), a function call whose result
 is discarded can leak that value into the argument stream of an enclosing
-call, and `do` of a block whose last expression produces no value (an
-assignment, a `set`, a zero-arity call) corrupts the enclosing frame,
-usually as a silent exit. The third was first misdiagnosed as "escape
-blocks cannot assign," which accidentally enforced this proposal's own
-"escapes should compute, not mutate" rule. The real trigger is the
-value-less tail, and the draft now sidesteps it by evaluating every
-escape block padded with a trailing value (`op ++ [true]`), so escapes
-may in fact assign freely. The unused-result leak is likewise avoided
+call, and binding the result of an expression that produces no value (an
+assignment, a `set`, a call to a function whose body ends in one)
+corrupts the enclosing frame, usually as a silent exit. The third was
+misdiagnosed twice, first as "escape blocks cannot assign", which
+accidentally enforced this proposal's own "escapes should compute, not
+mutate" rule, then as a property of `do`. The real trigger is the
+binding, and the draft sidesteps it by evaluating every escape block
+padded with a trailing value (`op ++ [true]`) and discarding the result,
+so escapes may in fact assign freely. The unused-result leak is likewise avoided
 with the language's own `discard` rather than dummy assignments. Even
 the lexer bug has an in-language mitigation, and it is the most
 Carpintero-shaped fix imaginable: `read` returns raw source without
