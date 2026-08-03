@@ -84,8 +84,8 @@ Charsets are values and compose: `csUnion`, `csIntersect`,
 
 Two utilities ride along. `stripComments` removes comments from a source
 string with a Carpintero grammar, and `loadSafe` reads a file, strips it,
-and returns the lexed block, sidestepping the 0.10.0 lexer bug where
-comment contents can hang or corrupt the interpreter
+and returns the lexed block, sidestepping the 0.10.0 lexer bug where a
+backslash in a `;;` documentation comment hangs the interpreter
 (`examples/safeload.art` runs a file that hangs `arturo` directly).
 
 ## Two implementations
@@ -208,7 +208,8 @@ and a half, and a cost per kilobyte that stays flat as the input doubles.
 ## Interpreter bugs
 
 [`bugs/`](bugs/README.md) has minimal repros for three Arturo 0.10.0
-interpreter bugs: a backslash in a `;;` comment that hangs the lexer, a
+interpreter bugs: a backslash in a `;;` documentation comment that hangs
+the lexer, a
 value-stack underflow that exits 1 without a word, and a `:symbolliteral`
 that is not equal to itself. The
 first two were found by writing the dialect and the third by running it over

@@ -22,13 +22,13 @@
 ;;
 ;; Three accommodations for Arturo 0.10.0, found while writing this file,
 ;; each expressed with a feature of the language:
-;;   1. comments avoid quote marks, brackets and backslashes, since the
-;;      lexer scans the contents of a double-semicolon comment — a
-;;      backslash before anything but a letter hangs it. This file keeps
-;;      its comments plain, and exports the general fix: loadSafe strips
-;;      comments from source at the string level, before the lexer sees
-;;      a byte of them, using a Carpintero grammar — see comment-safe
-;;      source loading at the end of this file.
+;;   1. comments avoid quote marks, brackets and backslashes, since a
+;;      double-semicolon comment is the documentation form and is read
+;;      by the interpreter — a backslash before anything but a letter
+;;      hangs it. This file keeps its comments plain, and exports the
+;;      general fix: loadSafe strips comments from source at the string
+;;      level, before the lexer sees a byte of them, using a Carpintero
+;;      grammar — see comment-safe source loading at the end of this file.
 ;;   2. every call whose result is unused goes through discard. Values
 ;;      left on the value stack are read as arguments by the enclosing
 ;;      call, which is by design, and discard states the intent

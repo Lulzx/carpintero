@@ -11,20 +11,28 @@ A value of type `:symbolliteral`, the quoted-operator form (`'+`, `'-`,
 for the very same value, so the type is outside reflexive equality
 entirely.
 
-The underlying comparison is what to look at first. `compare` reports
-"greater" for a value against itself, while both orderings report false:
+The underlying comparison is what to look at first, and two lines show it:
 
 ```arturo
-s: first to :block {'+}
-
-print ["compare s s:" compare s s]   ; 1
-print ["s < s:" s < s]               ; false
-print ["s > s:" s > s]               ; false
-print ["s = s:" s = s]               ; false
+print compare '+ '+     ; 1
+print '+ = '+           ; false
 ```
 
-A `compare` that can only answer 1 is a comparison path with no case for
-the type, and it accounts for every symptom below in one line.
+`compare`'s own shipped documentation is "compare given values and return
+-1, 0, or 1 based on the result", and its example is `compare 3 3 ; => 0`.
+Here it answers 1 for one and the same value.
+
+It also disagrees with the comparison operators, which say nothing at all:
+
+```arturo
+print '+ < '+           ; false
+print '+ > '+           ; false
+```
+
+So the value is neither less than, equal to, nor greater than itself, while
+`compare` calls it greater. Two callers giving incompatible answers about
+one pair is a comparison path with no case for the type rather than a
+decision about symbols, and it accounts for every symptom below.
 
 Everything downstream of equality inherits it: `contains?` cannot find a
 symbolliteral in a block that holds it, `unique` will not deduplicate one,
@@ -42,12 +50,10 @@ symbolliteral is affected, and every spelling of it is:
 ## To reproduce
 
 ```arturo
-s: first to :block {'+}
-
-print s = s              ; false, expected true
-print equal? s s         ; false, expected true
-print contains? @[s] s   ; false, expected true
-print unique @[s s]      ; [+ +], expected [+]
+print '+ = '+            ; false, expected true
+print equal? '+ '+       ; false, expected true
+print contains? @['+] '+ ; false, expected true
+print unique @['+ '+]    ; [+ +], expected [+]
 
 a: to :block {byteCode ['+]}
 b: to :block {byteCode ['+]}

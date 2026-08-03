@@ -15,20 +15,23 @@ described in
 [the manual](../MANUAL.md#validation-against-arturos-own-source). All four have
 in-language mitigations. Each section names its fix.
 
-## 1. `comment-lexer-hang.art`: `;;` comment contents are scanned by the lexer
+## 1. `comment-lexer-hang.art`: a backslash in a `;;` comment hangs the lexer
 
-A `;` comment is ignored. A `;;` comment is not. A backslash inside one,
-followed by anything that is not a letter, hangs the lexer forever (100%
-CPU, no output), and an unbalanced `(` or `"` inside one raises a syntax
-error. Both are fine with a single semicolon, and neither form contributes
-to the program: `to :block` gives the same tokens either way.
+`;;` is the documentation-comment form, and the interpreter reads its
+contents on purpose: they become the metadata `info` prints back. Reading
+it is the feature. A backslash inside one, followed by anything that is not
+a letter, loops forever (100% CPU, no output), and an unbalanced `(` or `"`
+inside one raises a syntax error, which is awkward for a field that holds
+free text. A single `;` is ignored outright and does neither.
 
 What decides the hang is the character after the backslash. Letters are
 fine, as are `_` and `/`; `-`, `+`, `.`, `,`, `:`, `=`, `<`, `~`, `?`, `!`,
 `|`, `$`, `*`, `)`, a digit, a space and a second backslash all hang. A
-backslash with a word character before it is fine (`;; x\-` runs), which is
-the shape of ordinary path syntax. What once looked like context-dependence
-across adjacent comment lines was this rule and the `;;` distinction.
+backslash with a word character before it is fine (`;; x\-` runs), the
+shape of ordinary path syntax, so the scanner looks to be reading `\` as
+the start of a path component and never terminating. What once looked like
+context-dependence across adjacent comment lines was this rule and the `;;`
+distinction.
 
 The string-lexer path hangs too: `to :block` over the same source read raw
 never returns either, so this is the lexer and not just the file loader.
@@ -104,9 +107,11 @@ Both halves matter, since `res: discard do blk ++ [true]` underflows again,
 
 ## 4. `symbolliteral-equality.art`: a `:symbolliteral` is not equal to itself
 
-`compare s s` returns 1 for one and the same value, while `s < s` and
-`s > s` are both `false`, so this is a comparison path with no case for the
-type. Equality inherits it: `'+ = '+` is `false`, so is `equal? s s`, and
+`compare '+ '+` returns 1 for one and the same value, against a shipped
+contract of "-1, 0, or 1" with `compare 3 3 ; => 0` as its own example,
+while `'+ < '+` and `'+ > '+` are both `false`. Two callers giving
+incompatible answers about one pair is a comparison path with no case for
+the type. Equality inherits it: `'+ = '+` is `false`, so is `equal? '+ '+`, and
 the type is outside reflexive equality entirely. Every spelling is
 affected (`'+ '- '* '^ '~ '=> '-->`), and so is everything built on
 equality: `contains?` cannot find one, `unique` will not deduplicate one,

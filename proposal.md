@@ -365,8 +365,9 @@ grammar succeeding. Direct left recursion
 nullable prefix, and unbound rule words are all rejected at scan start with
 messages naming the cycle or the word. Writing it also surfaced two
 interpreter bugs worth filing upstream, which is what dogfooding is for
-(minimal repros in `bugs/`): the 0.10.0 lexer scans the contents of a `;;`
-comment, where a backslash before anything but a letter hangs it forever,
+(minimal repros in `bugs/`): the 0.10.0 lexer reads the contents of a `;;`
+documentation comment, as it should, but a backslash before anything but a
+letter hangs it forever,
 and popping an empty value stack ends the run with exit 1 and no message at
 all. The second was misdiagnosed three times, first as "escape blocks cannot
 assign", which accidentally enforced this proposal's own "escapes should

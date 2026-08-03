@@ -1,8 +1,11 @@
-; A `;;` comment is scanned by the lexer; a `;` comment is not. Inside a `;;`
-; comment, a backslash followed by anything other than a letter hangs the
-; lexer forever. The same line written with a single `;` runs fine, and so
-; does `;; with - dash`. Both forms are stripped from the token stream, so
-; nothing here reaches the program either way.
+; `;;` is Arturo's documentation-comment form: the interpreter reads its
+; contents and stores them as function metadata for `info`. Reading it is
+; the feature. Hanging on it is not.
+;
+; A backslash inside a `;;` comment, followed by anything that is not a
+; letter, loops forever. An unbalanced `(` or `"` inside one is a syntax
+; error. Neither happens with a single `;`, which is ignored outright, and
+; neither needs a function anywhere near it.
 ;
 ; This header is deliberately written with single semicolons.
 

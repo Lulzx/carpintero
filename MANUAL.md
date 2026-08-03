@@ -464,9 +464,9 @@ with the numbers under
 
 ## Comment-safe source loading
 
-Two utilities ride along because the 0.10.0 lexer scans the contents of a
-`;;` comment: a backslash in one hangs the loader, and an unbalanced
-delimiter in one is a syntax error (see `bugs/`).
+Two utilities ride along because `;;` is the documentation-comment form
+and the 0.10.0 lexer reads it: a backslash in one hangs the loader, and an
+unbalanced delimiter in one is a syntax error (see `bugs/`).
 
 ```red
 stripComments src         ; source string -> source string, comments gone
