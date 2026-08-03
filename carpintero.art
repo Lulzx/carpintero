@@ -769,8 +769,21 @@ matchMany: function.inline [qItems qIdx qPos qNeed][
     ; the progress guard fires here, not after a second identical
     ; iteration: an iteration that matched without consuming ends the
     ; loop, and running the body again to discover that costs a second
-    ; set of captures and a second run of any escape inside it
-    if qP = qPos -> return qP
+    ; set of captures and a second run of any escape inside it.
+    ; Whether that first pass is taken is the one place some and any
+    ; differ. The first pass of `some` is mandatory, so it is taken even
+    ; though it made no progress, exactly as the single pass of `1 R` is.
+    ; `any` has no mandatory pass, so a stalled first pass is an optional
+    ; one that ended the loop, and what it logged goes with it, the same
+    ; as every stalled pass in the loop below.
+    if qP = qPos [
+        unless qNeed [
+            if (size CS\log) > qSz [
+                CS\log: (qSz = 0)? -> [] -> slice CS\log 0 qSz - 1
+            ]
+        ]
+        return qP
+    ]
     qGo: true
     while [qGo][
         qSz: size CS\log
@@ -802,6 +815,15 @@ matchMany: function.inline [qItems qIdx qPos qNeed][
     qP
 ]
 
+;; between N M R: bounded repetition, which carries no progress guard.
+;; The guard exists so that a nullable body cannot spin, and an upper
+;; bound already guarantees that, so an iteration here counts whether or
+;; not it consumed. That is also the only reading under which the two
+;; spellings of the same thing agree: `N R` above is a retry-free loop of
+;; exactly N iterations, so `2 end` matches, and `between 2 2 end` has to
+;; match too. Counting only the iterations that consumed made the bounded
+;; form reject what the exact form accepts, and made both disagree with
+;; the compiled core, which unrolls the bounds the way LPeg does.
 matchBetween: function.inline [wItems wIdx wPos wLo wHi][
     wCnt: 0
     wP: wPos
@@ -810,24 +832,16 @@ matchBetween: function.inline [wItems wIdx wPos wLo wHi][
         wSz: size CS\log
         wP2: matchOne wItems wIdx wP
         if wP2 = NOTSIMPLE -> wP2: matchElem wItems wIdx wP
-        wGo: false
         if null? wP2 [
+            wGo: false
+            ; a failed iteration is not taken, so what it logged goes
             if (size CS\log) > wSz [
                 CS\log: (wSz = 0)? -> [] -> slice CS\log 0 wSz - 1
             ]
         ]
         unless null? wP2 [
-            wAdv: wP2 <> wP
-            if wAdv [
-                wP: wP2
-                wCnt: wCnt + 1
-                wGo: true
-            ]
-            unless wAdv [
-                if (size CS\log) > wSz [
-                    CS\log: (wSz = 0)? -> [] -> slice CS\log 0 wSz - 1
-                ]
-            ]
+            wP: wP2
+            wCnt: wCnt + 1
         ]
     ]
     (wCnt >= wLo)? -> wP -> null

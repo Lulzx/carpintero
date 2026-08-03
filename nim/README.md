@@ -23,7 +23,7 @@ cd nim && nim c --hints:off -r tests/differential.nim adapter/cases.json
 `adapter/export.art` writes a grammar, an input, and what the interpreted
 matcher made of them. `src/carpintero/load.nim` reads all three back, and
 `tests/differential.nim` reruns the grammar here and checks the two engines
-agree. 51 cases, no disagreements. Because each case carries the interpreted
+agree. 78 cases, no disagreements. Because each case carries the interpreted
 answer with it, this compares two engines rather than comparing one engine
 against something hand-written, so a disagreement is a real disagreement
 about the language.

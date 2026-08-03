@@ -66,6 +66,50 @@ CASES: @[
     caseTree "guard-any"        [any [opt "a"] "xy"]           "xy"
     caseTree "guard-capture"    [some [capture 'x opt "a"]]    "a"
     caseTree "guard-keep"       [collect 'c [some [keep [opt skip]]]]      "ab"
+    ;; the stall on the first iteration rather than the tail, which is
+    ;; where the two engines parted company until the early return in
+    ;; matchMany unwound its log like every other exit does
+    caseTree "guard-keep-first" [collect 'c [any [keep end]]]              ""
+    caseTree "guard-keep-null"  [collect 'c [any [keep opt "z"]]]          ""
+    caseTree "guard-cap-first"  [any [capture 'x end]]                     ""
+    ;; the counted forms, which carry no guard because a bound already
+    ;; terminates them, and which have to agree with each other
+    caseTree "count-exact-null" [2 end]                                    ""
+    caseTree "count-btw-null"   [between 2 2 end]                          ""
+    caseTree "count-btw-keep"   [collect 'c [between 0 3 [keep end]]]      ""
+    caseTree "count-btw-real"   [between 2 4 "a"]                          "aaa"
+    ;; the empty string is a zero-width match against text and an element
+    ;; against a block, and one compiled program serves both
+    caseTree "empty-str-text"   [""]                                       ""
+    caseTree "empty-str-text-a" ["" "a"]                                   "a"
+    caseTree "empty-str-none"   [""]                                       []
+    caseTree "empty-str-elem"   [""]                                       @[""]
+    caseTree "empty-str-other"  [""]                                       @["a"]
+    caseTree "empty-str-skip"   ["" skip]                                  @["a"]
+    ;; an alternative whose cut is never reached must not commit the block.
+    ;; These looked like a cut bug for as long as the empty string above
+    ;; matched vacuously here: it reached the cut, the cut committed, and
+    ;; the arm then failed with nowhere to go.
+    caseTree "cut-unreached"    [["" cut skip | cut]]                      []
+    caseTree "cut-unreached-2"  [["" cut 'greet | cut]]                    []
+    caseTree "cut-unreached-t"  [["z" cut skip | cut]]                     ""
+
+    ;; whether a name that matched nothing is bound at all. A collect that
+    ;; ran and kept nothing binds an empty block; one in an alternative
+    ;; that failed binds nothing, which is not the same answer.
+    caseTree "bind-coll-none"   [collect 'k [any [keep "z"]]]              ""
+    caseTree "bind-coll-dead"   [collect 'k [any [keep "a"]] "z" | "a"]    "a"
+    caseTree "bind-coll-ahead"  [ahead collect 'k [any [keep "z"]] "a"]    "a"
+    caseTree "bind-coll-same"   [collect 'k [any [keep collect 'k [any [keep "a"]]]]]  "a"
+    caseTree "bind-coll-into"   [into [collect 'k [any [keep "z"]]]]       [[]]
+    caseTree "bind-cap-opt"     [capture 'c opt "z"]                       ""
+    caseTree "bind-cap-dead"    [capture 'c "a" "z" | "a"]                 "a"
+
+    ;; the mandatory pass of some against the optional first pass of any
+    caseTree "some-mandatory"   [collect 'c [some [keep end]]]             ""
+    caseTree "some-vs-exact"    [collect 'c [1 [keep end]]]                ""
+    caseTree "some-cap-empty"   [some capture 'x ""]                       ""
+    caseTree "any-no-pass"      [collect 'c [any [keep end]]]              ""
 
     ;; collect and keep
     caseTree "words"            words                          "one, two, three"

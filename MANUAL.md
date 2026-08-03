@@ -122,8 +122,19 @@ print scanError
 | `skip` | any one char | any one element |
 | `end` | end of input | end of input |
 
-An empty string `""` matches nothing and consumes nothing (string input
-only).
+The empty string `""` follows the first row rather than escaping it. On
+string input it matches those characters, of which there are none, so it
+succeeds without consuming. On block input it is an element like any
+other, and the element it matches is an empty string:
+
+```red
+scan ""     [""]        ; => [] — matched, nothing consumed
+scan @[""]  [""]        ; => [] — matched the one element
+scan @[]    [""]        ; => null — there is no element to match
+```
+
+A rule that relies on `""` to mean "always succeeds" therefore means
+something different once it is pointed at a block.
 
 `quote` compares with `=`, which is exact for every type except one: on
 Arturo 0.10.0 a `:symbolliteral` is not equal to itself, so `[quote '+]`
@@ -183,9 +194,10 @@ consonant: csIntersect charset "a-z" csComplement charset "aeiou"
 | `between 2 5 rule` | N through M, greedy |
 
 All repetition is **greedy and does not give back**: `[any "a" "a"]`
-can never match. All loops carry the **progress guard**: an iteration
-that matches without consuming input ends the loop, so nullable loop
-bodies (`some [opt "a"]`) terminate instead of hanging.
+can never match. The unbounded loops, `some` and `any`, carry the
+**progress guard**: an iteration that matches without consuming input
+ends the loop, so nullable loop bodies (`some [opt "a"]`) terminate
+instead of hanging.
 
 The iteration that ends the loop is not taken. Whatever it captured,
 kept or deferred rolls back with it, so a stalled pass leaves nothing
@@ -199,6 +211,33 @@ scan "a" [some [capture 'x opt "a"]]
 The distinction matters for any loop body that can match empty and also
 capture: without it, the final zero-width pass would overwrite the
 capture the productive pass made.
+
+It applies to the **optional** passes, which is where `some` and `any`
+part company. `some rule` is one mandatory pass followed by `any rule`,
+and a mandatory pass is taken whether or not it consumed, exactly as the
+single pass of `1 rule` is. `any` has no mandatory pass, so a stalled
+first pass is simply the one that ended the loop:
+
+```red
+scan "" [collect 'c [some [keep end]]]   ; => [c: [""]], same as [1 [keep end]]
+scan "" [collect 'c [any  [keep end]]]   ; => [c: []]
+```
+
+**The counted forms have no guard**, because an upper bound already
+makes them terminate. `4 rule` runs its body exactly four times and
+`between 2 5 rule` up to five, whether or not those passes consume, and
+each counts toward the bounds:
+
+```red
+scan "" [between 2 2 end]     ; matches, exactly as [2 end] does
+scan "" [collect 'c [between 0 3 [keep end]]]
+; => [c: ["" "" ""]]
+```
+
+A nullable body under a counted form therefore runs to the upper bound
+rather than stopping at the first stalled pass. Bounds are small by
+nature, and the alternative is `2 rule` and `between 2 2 rule` meaning
+different things.
 
 ### Sequence, choice, grouping
 

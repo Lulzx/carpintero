@@ -184,7 +184,10 @@ proc emit(c: var Ctx, n: Node) =
         # A one-character string stays a string, and is not folded into
         # opChar: against block input `"a"` matches a `:string` element and
         # `'a'` matches a `:char` element, so the two cannot share an opcode.
-        if n.text.len == 0: return          # matches without consuming
+        # The empty string is emitted for the same reason. It matches without
+        # consuming against text, but against a block it is an element like
+        # any other, and one program serves both, so the input kind decides
+        # at run time in opStr rather than here.
         discard c.p.add(opStr, c.p.poolStr(n.text))
 
     of nkChar:

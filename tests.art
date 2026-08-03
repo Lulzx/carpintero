@@ -176,7 +176,7 @@ discard t "any is greedy and does not give back" scan? "aaa" [any "a" "a"] false
 discard t "progress guard on any" scan? "xy" [any [opt "a"] "xy"] true
 discard t "progress guard on some" scan? "xy" [some [opt "a"] "xy"] true
 discard t "progress guard on empty string body" scan? "z" [any "" "z"] true
-discard t "progress guard on between" scan? "z" [between 0 9 [opt "a"] "z"] true
+discard t "nullable body under between terminates" scan? "z" [between 0 9 [opt "a"] "z"] true
 
 ;; the guard has to fire on the iteration that made no progress, not one
 ;; iteration later: a loop that runs its body an extra time at the same
@@ -190,6 +190,47 @@ pg1: scan "a" [some [capture 'x opt "a"]]
 discard t "the empty tail iteration does not clobber the capture" pg1\x "a"
 pg2: scan "ab" [collect 'c [some [keep [opt skip]]]]
 discard t "the empty tail iteration keeps nothing" size pg2\c 2
+
+;; the same rollback when the stalled iteration is the first one. Every
+;; case above has a consuming iteration before the stall, and the loop
+;; returned early on a first iteration that made no progress without
+;; unwinding what it logged, so the rule held everywhere except at the
+;; one position no written test visited. A random grammar found it.
+pg3: scan "" [collect 'c [any [keep end]]]
+discard t "a stalled first iteration keeps nothing" size pg3\c 0
+pg4: scan "" [collect 'c [any [keep opt "z"]]]
+discard t "a stalled first nullable iteration keeps nothing" size pg4\c 0
+pg5: scan "" [any [capture 'x end]]
+discard t "a stalled first iteration captures nothing" (key? pg5 'x) false
+
+;; the first pass of `some` is mandatory, so it is taken even when it
+;; consumed nothing, exactly as the single pass of `1 R` is. `any` has no
+;; mandatory pass, so its stalled first pass is an optional one that ended
+;; the loop. That is the only place the two forms differ.
+pg9: scan "" [collect 'c [some [keep end]]]
+discard t "the mandatory pass of some is taken" size pg9\c 1
+pg10: scan "" [collect 'c [1 [keep end]]]
+discard t "some and the exact form agree on one pass" (size pg9\c) (size pg10\c)
+pg11: scan "" [some capture 'x ""]
+discard t "the mandatory pass of some captures" (key? pg11 'x) true
+pg12: scan "" [collect 'c [any [keep end]]]
+discard t "any has no mandatory pass to take" (size pg12\c) 0
+
+;; the counted forms have no guard: an upper bound already terminates
+;; them, and `2 R` and `between 2 2 R` have to mean the same thing.
+;; Counting only the passes that consumed made the bounded form reject
+;; what the exact form accepts.
+discard t "exact repeat of a nullable body" scan? "" [2 end] true
+discard t "bounded repeat of a nullable body" scan? "" [between 2 2 end] true
+discard t "bounded repeat matches the exact form" (scan? "" [between 3 3 end]) (scan? "" [3 end])
+pg6: scan "" [collect 'c [3 [keep end]]]
+pg7: scan "" [collect 'c [between 3 3 [keep end]]]
+discard t "both counted forms keep the same passes" (size pg7\c) (size pg6\c)
+pg8: scan "" [collect 'c [between 0 3 [keep end]]]
+discard t "an optional pass counts even when it consumed nothing" size pg8\c 3
+;; the consuming case is untouched by any of that
+discard t "bounded repeat still counts consumed passes" scan? "aaa" [between 2 4 "a"] true
+discard t "bounded repeat still enforces its lower bound" scan? "a" [between 2 4 "a"] false
 
 ;; ── to, thru, skip, end ──────────────────────────────────────────────
 discard section "advance"

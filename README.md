@@ -137,9 +137,15 @@ Four that surprise people. All deliberate, all argued in
   abandoned, so they should compute rather than mutate. `defer` is the sound
   alternative: queued in the capture log, run once on overall success, and
   discarded with a dead branch.
-- **Loops cannot spin.** An iteration that matches without consuming ends
-  the loop, and is not taken: what it captured rolls back with it. Left
-  recursion is rejected at scan start with the cycle named.
+- **Loops cannot spin.** In `some` and `any`, an *optional* pass that
+  matches without consuming ends the loop, and is not taken: what it
+  captured rolls back with it. Mandatory passes are always taken, which is
+  the whole difference between the two, since `some rule` is one mandatory
+  pass followed by `any rule`. The counted forms need no guard at all,
+  because a bound already terminates them, so `4 rule` and `between 2 5
+  rule` run their body whether or not it consumes, and `between 2 2 rule`
+  means what `2 rule` means. Left recursion is rejected at scan start with
+  the cycle named.
 
 Matching is case-sensitive and works on characters, not bytes.
 
@@ -151,16 +157,33 @@ scripts/run-tests.sh
 
 | Suite | What it covers |
 | --- | --- |
-| `tests.art` | 359 checks over the interpreted matcher |
+| `tests.art` | 373 checks over the interpreted matcher |
 | `tests-panics.art` | 18 grammar errors, one interpreter each |
 | `nim/tests/test_vm.nim` | 46 checks over the compiled core |
 | `nim/tests/test_wire.nim` | the FFI input read both ways and compared |
-| `nim/tests/differential.nim` | 51 cases run in both engines and compared |
+| `nim/tests/differential.nim` | 78 cases run in both engines and compared |
 | `demo.art` | 71 checks, written to be read rather than to cover |
 
 The panic cases need one interpreter apiece: a panic unwound through `try`
 leaves the abandoned frames' values behind for the next statements to
 misread, so a single process cannot check more than one of them.
+
+Those suites ask the questions someone thought to ask. `scripts/fuzz.sh`
+asks the rest:
+
+```
+scripts/fuzz.sh 10 100
+```
+
+Each batch writes random grammars with the interpreted answer attached and
+reruns them in the compiled core, which is the differential runner reading
+its ordinary case format. Grammars are well formed by construction, so a
+batch that dies is a finding rather than noise, and every batch leaves a
+listing beside its case file naming the grammar behind each disagreement.
+Four semantic disagreements came out of it, each shrunk to a grammar a
+line long and now pinned in the tables above: which passes of a loop are
+guarded, whether a bounded repeat counts a pass that consumed nothing,
+and what the empty string means against a block.
 
 ## Examples
 
