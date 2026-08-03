@@ -1,0 +1,64 @@
+;; fuzz.art — write a batch of random cases for the differential runner.
+;;
+;;     arturo nim/adapter/fuzz.art out.json 200 text
+;;     arturo nim/adapter/fuzz.art out.json 200 block
+;;     arturo nim/adapter/fuzz.art out.json 20 text show   ; print each one
+;;
+;; cases.art writes grammars a person thought of. Both engines were written
+;; by the same hand, so a case set written by that hand shares its blind
+;; spots: the two can agree about everything anyone thought to ask and still
+;; disagree about the language. This writes grammars nobody thought of, in
+;; the same file format, so tests/differential.nim reads them unchanged.
+;;
+;; A batch is one process. Nothing here catches a panic, because a panic
+;; unwound through try leaves the values of abandoned frames behind for the
+;; next statement to misread, so a grammar that kills the matcher has to
+;; kill the batch instead. scripts/fuzz.sh runs many small batches for that
+;; reason and reports the ones that died.
+
+import ./"fuzzgen.art"!
+
+out:  (empty? arg)? -> "fuzz.json"  -> arg\0
+n:    (2 > size arg)? -> 50         -> to :integer arg\1
+mode: (3 > size arg)? -> "text"     -> arg\2
+
+;; a fourth argument, any value, prints each grammar as it is generated.
+;; The listing is what a bisect starts from when a batch dies.
+DEBUG: 3 < size arg
+
+;; The grammars are random, so a case that disagrees cannot be regenerated
+;; by rerunning. The listing written beside the case file is how a name in
+;; the differential output becomes a grammar to shrink: it is the only
+;; readable record of what was asked.
+LISTING: []
+
+CASES: []
+i: 0
+while [i < n][
+    g: fzBlock 3 mode
+    inp: (mode = "block")? -> fzItems 2 -> fzText
+    nm: ~"fuzz-|mode|-|i|"
+    gs: fzShow g
+    is: fzShow inp
+    line: nm ++ "  " ++ gs ++ "  over  " ++ is
+    LISTING: append LISTING line
+    if DEBUG [ print line ]
+    CASES: append CASES caseTree nm g inp
+    i: i + 1
+]
+
+;; How many matched. A generator that only ever produced failures would be
+;; comparing the two engines on the one answer that is easiest to agree
+;; about, so this number is part of the result rather than trivia.
+nok: 0
+i: 0
+while [i < size CASES][
+    if CASES\[i]\ok -> nok: nok + 1
+    i: i + 1
+]
+
+discard writeCases out CASES
+listingPath: out ++ ".txt"
+listingText: join.with: "\n" LISTING
+write listingText listingPath
+print ["wrote" size CASES mode "cases to" out "—" nok "matched," (size CASES) - nok "failed"]

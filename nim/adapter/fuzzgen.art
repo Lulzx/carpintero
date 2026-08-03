@@ -1,0 +1,198 @@
+;; fuzzgen.art — the random grammar generator.
+;;
+;;     arturo nim/adapter/fuzz.art out.json 200 text
+;;     arturo nim/adapter/fuzz.art out.json 200 block
+;;
+;; cases.art writes grammars a person thought of. Both engines were written
+;; by the same hand, so a case set written by that hand shares its blind
+;; spots: the two can agree about everything anyone thought to ask and still
+;; disagree about the language. This writes grammars nobody thought of.
+;;
+;; Every case carries the interpreted answer, exactly as cases.art does, so
+;; the file this produces is fed to tests/differential.nim unchanged. A
+;; disagreement is a real disagreement, and the case that found it is a
+;; grammar and an input, which is all that is needed to reproduce it.
+;;
+;; Grammars are well-formed by construction rather than filtered afterwards:
+;; keep appears only inside collect, to and thru take a terminal, and no rule
+;; is named, so nothing here can left-recurse. A generated grammar that
+;; panics the interpreted matcher is therefore a finding rather than noise,
+;; and it takes the batch down with it, which is why batches are small.
+
+import ./"export.art"!
+
+FZBAR: first [|]
+fzWord: function [s] -> to :word s
+
+;; ── the pieces a grammar is made of ──────────────────────────────────
+;; Small alphabets on purpose. Matching is interesting where alternatives
+;; overlap and backtracking has somewhere to go, and two letters collide
+;; far more often than twenty.
+
+FZLITS:   ["a" "b" "ab" "ba" "aa" ""]
+FZSETS:   @[charset "a" charset "ab" charset "a-c" csComplement charset "a"]
+FZCAPNS:  ["c0" "c1" "c2"]
+FZCOLNS:  ["k0" "k1"]
+FZTYPES:  @[:integer :string :block :word :label]
+FZWORDS:  ["function" "greet" "x"]
+
+;; capture and collect names are drawn from disjoint pools. The exporter
+;; tells a collected name from a captured one by reading the grammar, so a
+;; name used as both would confuse the rig rather than the engines.
+
+;; ── terminals ────────────────────────────────────────────────────────
+
+fzTerm: function [mode][
+    if mode = "block" [
+        r: random 0 3
+        if r = 0 -> return @[sample FZTYPES]
+        if r = 1 -> return @[to :literal sample FZWORDS]
+        ;; an integer written into a rule block is a repeat count, never a
+        ;; value to match, so matching one literally is what quote is for
+        if r = 2 -> return @[fzWord "quote" random 0 2]
+        return @[sample FZLITS]
+    ]
+    r: random 0 2
+    if r = 0 -> return @[sample FZSETS]
+    if r = 1 -> return @[to :char sample ["a" "b" "c"]]
+    @[sample FZLITS]
+]
+
+;; ── elements ─────────────────────────────────────────────────────────
+;; Returns a block of items to splice into a sequence. Depth is spent by
+;; every construct that takes an operand, so generation always terminates.
+
+fzElem: function [depth mode][
+    if depth =< 0 -> return fzTerm mode
+
+    r: random 0 13
+
+    if r = 0 -> return fzTerm mode
+    if r = 1 -> return @[fzWord "skip"]
+    if r = 2 -> return @[fzWord "end"]
+
+    ;; quantifiers
+    if r = 3 -> return append @[fzWord sample ["some" "any" "opt"]] fzElem (depth - 1) mode
+    if r = 4 -> return append @[random 0 3] fzElem (depth - 1) mode
+    if r = 5 [
+        lo: random 0 2
+        hi: lo + random 0 2
+        return append @[fzWord "between" lo hi] fzElem (depth - 1) mode
+    ]
+
+    ;; lookahead
+    if r = 6 -> return append @[fzWord sample ["not" "ahead"]] fzElem (depth - 1) mode
+
+    ;; advance: a terminal operand, which is the only shape these take
+    if r = 7 -> return append @[fzWord sample ["to" "thru"]] fzTerm mode
+
+    ;; captures
+    if r = 8 -> return append @[fzWord "capture" to :literal sample FZCAPNS]
+                              fzElem (depth - 1) mode
+    if r = 9 [
+        kept: append @[fzWord "keep"] fzElem (depth - 1) mode
+        body: append @[fzWord "any"] @[kept]
+        return append @[fzWord "collect" to :literal sample FZCOLNS] @[body]
+    ]
+
+    ;; descent, which only block input has
+    if r = 10 [
+        if mode = "block" -> return append @[fzWord "into"] @[fzBlock (depth - 1) mode]
+        return fzTerm mode
+    ]
+
+    ;; a nested block: grouping, alternation, and where a cut can live
+    @[fzBlock (depth - 1) mode]
+]
+
+;; a sequence of 0 to 3 elements, kept as a block *per element* rather than
+;; as one flat token list. A keyword and its operand are several tokens, so
+;; anything that inserts into a sequence has to insert between elements: a
+;; cut dropped between a capture and its operand makes a grammar that means
+;; nothing, and the matcher then reads the next token as the operand.
+fzSeq: function [depth mode][
+    out: []
+    n: random 0 3
+    i: 0
+    while [i < n][
+        out: append out @[fzElem depth mode]
+        i: i + 1
+    ]
+    out
+]
+
+fzFlatten: function [elems][
+    out: []
+    i: 0
+    n: size elems
+    while [i < n][ out: out ++ elems\[i], i: i + 1 ]
+    out
+]
+
+;; a block: one to three alternatives, with a cut sometimes committing one.
+;; cut is generated only inside a block with more than one arm, since that
+;; is the only place it has anything to commit.
+fzBlock: function [depth mode][
+    arms: random 1 3
+    out: []
+    i: 0
+    while [i < arms][
+        if i > 0 -> out: append out FZBAR
+        elems: fzSeq depth mode
+        if and? [arms > 1][0 = random 0 3] [
+            at: random 0 size elems
+            elems: (slice elems 0 at - 1) ++ @[@[fzWord "cut"]] ++ (slice elems at (size elems) - 1)
+        ]
+        out: out ++ fzFlatten elems
+        i: i + 1
+    ]
+    out
+]
+
+;; ── inputs ───────────────────────────────────────────────────────────
+
+fzText: function [][
+    n: random 0 6
+    out: ""
+    i: 0
+    while [i < n][ out: out ++ sample ["a" "b" "c"], i: i + 1 ]
+    out
+]
+
+fzItems: function [depth][
+    n: random 0 4
+    out: []
+    i: 0
+    while [i < n][
+        r: random 0 4
+        if r = 0 -> out: append out random 0 3
+        if r = 1 -> out: append out sample ["a" "ab" "x"]
+        if r = 2 -> out: append out to :word sample FZWORDS
+        if r = 3 -> out: append out first [greet:]
+        if r = 4 [
+            out: (depth > 0)? -> append out @[fzItems (depth - 1)]
+                             -> append out 0
+        ]
+        i: i + 1
+    ]
+    out
+]
+
+
+;; a grammar printed the way it was written, with charsets as their spec
+;; rather than as the 128-entry bitmap they carry. Chars and strings are
+;; both rendered, and differently, since the two are not interchangeable
+;; as terminals and a listing that blurred them would misdirect a bisect.
+fzShow: function [v][
+    if block? v [
+        parts: map v 'e -> fzShow e
+        return "[" ++ (join.with: " " parts) ++ "]"
+    ]
+    if dictionary? v [
+        if key? v 'kind -> return ~{cs"|v\spec|"}
+        return "#[]"
+    ]
+    if string? v -> return ~{"|v|"}
+    if char? v   -> return "ch:" ++ to :string v
+    to :string v
+]
