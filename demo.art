@@ -154,13 +154,20 @@ r7: scan "abc" [collect 'xs [keep "ab" "!"] | thru end]
 check "collect rollback" key? r7 "xs" false
 
 ;; the re-run contract for host escapes, demonstrated: the escape runs
-;; once per loop attempt, including the attempt that fails.
-;; escape blocks must call functions rather than assign directly, see
-;; bugs, do-assignment-crash
+;; once per loop attempt, including the attempt that fails
 G: #[n: 0]
 note: function [x][ G\n: G\n + x  x ]
 r8: scan "aab" [some [do [note 1] "a"] "b"]
 check "do runs per attempt" G\n 3
+
+;; escape blocks may assign directly: the matcher pads them with a
+;; trailing value before evaluation, which sidesteps the interpreter
+;; crash documented in bugs, do-assignment-crash
+G4: #[n: 0]
+r8b: scan "ab" ["a" do [G4\n: 5] "b"]
+check "do escape may assign" G4\n 5
+r8c: scan "ab" ["a" defer [G4\n: G4\n + 2] "b"]
+check "defer escape may assign" G4\n 7
 
 ;; Phase 3, cut, deferred escapes, opt-in memoization.
 

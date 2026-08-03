@@ -343,7 +343,7 @@ rather than a subsystem.
 This is no longer hypothetical: a draft ships alongside this proposal.
 `carpintero.art` (about 800 lines) implements the Phase 0 through Phase 2
 scope against Arturo 0.10.0, plus the interpreted half of Phase 3 —
-`cut`, `defer`, opt-in memoization — and `demo.art` passes sixty-six checks
+`cut`, `defer`, opt-in memoization — and `demo.art` passes sixty-eight checks
 covering the date example above, capture rollback across failed
 alternatives, the progress guard on nullable loop bodies, prefix mode,
 `to`/`thru`, charset ranges, a mutually recursive JSON validator in nine
@@ -368,10 +368,15 @@ interpreter bugs worth filing upstream, which is what dogfooding is for
 (minimal repros in `bugs/`): the 0.10.0 lexer does not fully ignore comment
 contents (a `\-` inside a comment hangs it), a function call whose result
 is discarded can leak that value into the argument stream of an enclosing
-call, and `do` of a block containing an assignment crashes when the
-executing function is itself nested — which forces the draft's escape
-blocks to call functions rather than assign, an accidental enforcement of
-this proposal's own "escapes should compute, not mutate" rule.
+call, and `do` of a block whose last expression produces no value — an
+assignment, a `set`, a zero-arity call — corrupts the enclosing frame,
+usually as a silent exit. The third was first misdiagnosed as "escape
+blocks cannot assign," which accidentally enforced this proposal's own
+"escapes should compute, not mutate" rule; the real trigger is the
+value-less tail, and the draft now sidesteps it by evaluating every
+escape block padded with a trailing value (`op ++ [true]`), so escapes
+may in fact assign freely. The unused-result leak is likewise avoided
+with the language's own `discard` rather than dummy assignments.
 
 **Then propose the matcher core in Nim,** once the vocabulary and the
 backtracking semantics have stopped moving. The target is an LPeg-style

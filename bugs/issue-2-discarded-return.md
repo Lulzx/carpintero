@@ -58,5 +58,7 @@ discarded, the output is correct (`expected: 42`).
 
 Found while developing a pure-Arturo parsing package, where it manifested
 as comparison checks failing on values that printed as equal. Workaround:
-assign every unused call result to a dummy variable and guard every `loop`
-that might iterate an empty collection.
+route every unused call result through the `discard` builtin — including
+`discard loop items 'x [...]` for the empty-loop face, which it also
+fixes. (Dummy-variable assignment works too, but `discard` is the
+intended tool and reads as intent.)

@@ -42,6 +42,22 @@ same `do` succeed.
 
 Prints `2`, then `3`, then `never reached`.
 
+## Root cause hypothesis, and a reliable workaround
+
+The common factor across every crashing shape is not the assignment: it is
+that the block's **last expression produces no value** (an assignment, a
+`set` call, a call to a function whose own body ends value-less). `do` of
+such a block appears to leave the enclosing frame expecting a value that
+never arrives; whether that corrupts anything is contextual, which is why
+the same shape sometimes works at one nesting depth and dies at another.
+
+Padding the block with a trailing value before evaluation makes every
+shape below work, at any depth tested:
+
+```arturo
+discard do blk ++ [true]
+```
+
 ## A second shape of the same crash
 
 The nesting is not required if the assignment hides inside a called

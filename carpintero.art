@@ -20,14 +20,17 @@
 ;;   into R, matching a nested block in its entirety with rule R
 ;;   any other word: a named rule, resolved when scan runs
 ;;
-;; Two workarounds for Arturo 0.10.0 interpreter quirks, found while
-;; writing this file:
+;; Three workarounds for Arturo 0.10.0 interpreter quirks, found while
+;; writing this file, each expressed with a feature of the language:
 ;;   1. comments avoid quote marks, brackets and backslashes, since the
 ;;      lexer does not fully ignore comment contents — a backslash-dash
-;;      in a comment hangs it
-;;   2. every function call whose result is unused is still assigned to
-;;      a dummy variable: a discarded call result can leak into the
-;;      argument stream of an enclosing call
+;;      in a comment hangs it. This one has no in-language fix.
+;;   2. every call whose result is unused goes through discard: a
+;;      dropped call result can otherwise leak into the argument
+;;      stream of an enclosing call
+;;   3. escape blocks are evaluated as op ++ [true]: do of a block
+;;      whose last expression produces no value corrupts the
+;;      enclosing frame, and the padding guarantees a value tail
 
 ;; ── charsets ─────────────────────────────────────────────────────────
 
@@ -235,7 +238,7 @@ elemSpan: function [items idx][
 matchElem: function [items idx pos][
     sz: logMark
     p: matchElemRaw items idx pos
-    if null? p [ t: logTrim sz ]
+    if null? p [ discard logTrim sz ]
     p
 ]
 
@@ -371,7 +374,12 @@ matchElemRaw: function [items idx pos][
         if w = "do" [
             op: items\[idx + 1]
             unless block? op -> panic "carpintero: do expects a block of host code"
-            res: do op
+            ; padded with a trailing value before evaluation: do of a
+            ; block whose last expression produces no value corrupts
+            ; the enclosing frame — see bugs, do-assignment-crash.
+            ; With the padding, escape blocks may assign, mutate via
+            ; set, or call zero-arity functions freely.
+            discard do op ++ [true]
             return pos
         ]
         if w = "fail" [
@@ -417,7 +425,7 @@ matchElemRaw: function [items idx pos][
             if null? inner -> done: true
             unless done [
                 unless inner = size el [
-                    t: failAt inner "end of nested block"
+                    discard failAt inner "end of nested block"
                     done: true
                 ]
             ]
@@ -556,7 +564,7 @@ matchBlock: function [blk pos][
                 CS\cuts: chop CS\cuts
                 return p
             ]
-            t: logTrim sz
+            discard logTrim sz
             if last CS\cuts [
                 CS\cuts: chop CS\cuts
                 return null
@@ -595,7 +603,7 @@ collectRules: function [blk reg][
     while [i < n][
         it: blk\[i]
         step: 1
-        if block? it [ s2: collectRules it reg ]
+        if block? it [ discard collectRules it reg ]
         if word? it [
             w: to :string it
             if in? w ["quote" "do" "fail" "defer"] -> step: 2
@@ -604,7 +612,7 @@ collectRules: function [blk reg][
                     unless set? w -> panic ~"carpintero: unbound rule word '|w|'"
                     reg\[w]: var w
                     if block? reg\[w] [
-                        sub: collectRules reg\[w] reg
+                        discard collectRules reg\[w] reg
                     ]
                 ]
             ]
@@ -748,7 +756,7 @@ dfsCycle: function [k reg nmap state path][
         unless empty? hs [
             loop hs 'h [
                 if key? reg h [
-                    sub: dfsCycle h reg nmap state append path k
+                    discard dfsCycle h reg nmap state append path k
                 ]
             ]
         ]
@@ -764,14 +772,14 @@ GCACHE: #[]
 
 checkGrammar: function [rule][
     reg: #[]
-    cr: collectRules rule reg
+    discard collectRules rule reg
     if empty? keys reg -> return true
     h: to :string hash @[rule reg]
     if key? GCACHE h -> return true
     nmap: computeNullmap reg
     state: #[]
     loop keys reg 'k [ state\[k]: 0 ]
-    loop keys reg 'k [ d: dfsCycle k reg nmap state [] ]
+    loop keys reg 'k [ discard dfsCycle k reg nmap state [] ]
     GCACHE\[h]: true
     true
 ]
@@ -794,7 +802,7 @@ scan: function [input rule][
         ]
     ]
     MC\tab: #[]
-    ok: checkGrammar rule
+    discard checkGrammar rule
     CS\inp: input
     CS\len: size input
     CS\isblk: block? input
@@ -842,9 +850,10 @@ scan: function [input rule][
                 cnames: chop cnames
                 citems: chop citems
             ]
-            ; deferred escapes run here, on commit, in match order
+            ; deferred escapes run here, on commit, in match order,
+            ; padded like the do escape
             if kind = "defer" [
-                res: do e\1
+                discard do e\1 ++ [true]
             ]
         ]
     ]
