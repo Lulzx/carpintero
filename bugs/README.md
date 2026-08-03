@@ -50,16 +50,15 @@ also fixes. `carpintero.art` does this throughout.
 Diagnosed twice before it was diagnosed right. First as "`do` of a block
 containing an assignment crashes when the executing function is nested",
 then as "`do` of a block whose last expression produces no value". Both
-were describing the shape we happened to hit rather than the rule, which
-is simply: **an assignment whose right-hand side produces no value exits 1
+were describing the shape that turned up first rather than the rule, which
+is: **an assignment whose right-hand side produces no value exits 1
 silently**. Leaving the same expression unbound is fine.
 
 Neither `do` nor nesting is required. Two statements are enough:
 `y: print "hi"` prints and then kills the interpreter. The `do` forms
 (`res: do [G\n: 3]`), the value-less function tail (`y: bad 1`), and
 `r: discard ...` are all the same rule reached by different routes, which
-is why it looked contextual and depth-dependent for so long. It is
-neither.
+is the whole of what looked for so long like depth-dependence.
 
 Run: `arturo valueless-assignment.art`. Expected four lines. Actual:
 three, then silent exit 1. `do-assignment-crash.art` and
@@ -68,7 +67,7 @@ in, kept because they are the ones a `do`-using program actually meets.
 
 **Mitigation:** do not bind the result, and where a block must produce
 one, pad it: `discard do blk ++ [true]`. Both halves matter, since
-`res: discard do blk ++ [true]` crashes again — `discard` is value-less
+`res: discard do blk ++ [true]` crashes again: `discard` is value-less
 itself. `carpintero.art` pads its `do` and `defer` escape blocks this way
 and discards the result, so grammar escapes may assign freely.
 

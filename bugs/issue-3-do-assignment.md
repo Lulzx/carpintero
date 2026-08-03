@@ -24,10 +24,10 @@ Actual output: `before`, `hi`, then silent exit 1.
 `print` is standing in for any expression that yields nothing. The same
 crash arrives through every other route to a value-less right-hand side.
 
-## The other faces
+## The other routes to it
 
-Each of these is the one rule above, wearing different clothes. Each
-exits 1 silently on the last line shown.
+Each of these is the rule above reached a different way. Each exits 1
+silently on the last line shown.
 
 A `do` of a block whose last expression is an assignment:
 
@@ -55,22 +55,23 @@ r: discard do blk ++ [true]   ; crashes
 discard do blk ++ [true]      ; fine, unbound
 ```
 
-`bugs/valueless-assignment.art` in the report below is the two-statement
-form, with the value-ful control beside it.
+`valueless-assignment.art` is the two-statement form as a runnable file,
+with a control beside it that binds an expression which does produce a
+value.
 
 ## What is *not* the trigger
 
-Worth stating, because this bug wears enough disguises to look like
-several, and we chased two of them a long way before finding the rule:
+Worth stating, because the shapes above look like separate bugs, and two
+of them were reported as separate bugs before the rule turned up:
 
 - **`do` is not required.** `y: print "hi"` has no block in it.
 - **Function nesting is not required.** All of the above crash at top
   level, in a file with no user-defined function at all.
 - **Arity is not the discriminator.** `bad` and a value-returning
   function of the same arity behave differently.
-- **It is not contextual.** Every case we found that looked
-  depth-dependent or position-dependent turned out to be the presence or
-  absence of a binding.
+- **It is not contextual.** Every case that looked depth-dependent or
+  position-dependent turned out to be the presence or absence of a
+  binding.
 
 ## Expected behavior
 
