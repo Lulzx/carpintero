@@ -412,13 +412,24 @@ of scanning and the compiled core 28 milliseconds.
 **It has to be a builtin, and that is a measured claim rather than a
 preference.** The package changes nothing in Arturo, so the only way to
 reach the compiled core from Arturo today is `call.external`, which carries
-scalars. Sending a lexed file across that boundary costs 1.5 seconds of the
-interpreter's time to render, against 0.08 seconds to cross and match, and
-that is after three rounds of optimisation took the rendering down from
-15.3. Serialisation is 95% of the bridge and the engine is not the
-bottleneck: an
-extension API that serialises cannot expose this, and a builtin holding the
-`Value` block it was handed does not have to. What
+scalars. `nim/adapter/fast.art` does exactly that, and it is worth having:
+about thirteen times faster than the interpreted matcher over the corpus,
+with no change to Arturo at all. What it cannot do is expose the engine.
+
+| | Corpus time | |
+| --- | ---: | --- |
+| `scan` | 22.66 s | pure Arturo, the reference |
+| `scanFast` | 1.70 s | the shared library, no change to Arturo |
+| the core on values it already holds | 0.028 s | what direct access would expose |
+
+Three rounds of optimisation took the serialisation from 15.3 seconds to
+1.5, which is enough to answer the obvious objection that the bridge was
+simply written badly. It still accounts for 95% of the middle row, and what
+is left is not escaping or a wasteful encoding but traversing Arturo's own
+value tree from Arturo and building a second copy of it. A further round
+would likely shave more; it would not change which row the ceiling sits in.
+An extension API that serialises accelerates the reference implementation.
+A builtin holding the `Value` block it was handed is the third row. What
 that asks for upstream is a `src/library/Parse.nim` and a line in
 `src/vm/vm.nim`, plus a way for `do` and `defer` to evaluate back into the
 interpreter. Everything else in `nim/` is already written and tested.

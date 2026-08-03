@@ -146,17 +146,32 @@ the fast path from being an assumption.
 What did not move is the part that matters. The call, JSON parsing and
 matching included, costs 80 milliseconds, and the compiled core scans the
 same corpus in 28 when handed values it already holds. Serialisation is
-still 95% of the bridge. What is left is not a slow escaper or a wasteful
-encoding, since those are gone: it is roughly 16 microseconds per value
-spent calling a function in Arturo and building a frame for it, and the
-only way to not pay it is to not walk the values in Arturo.
+still 95% of the bridge.
+
+What changed is what that 95% is made of. It is no longer escaping or a
+redundant encoding, which is what the three rounds removed. It is now
+traversing Arturo's existing value tree from Arturo and building a second
+representation of it, which on this corpus and this emitter works out at
+roughly 16 microseconds a value. Another round would probably find
+something (an iterative walk, fewer frames, a buffer API rather than
+strings), so this is not a floor. It is a change of kind: the remaining
+cost belongs to walking and rebuilding the values, not to how they are
+written down.
 
 That is the argument for a builtin rather than a bridge, and it is the one
-thing an FFI experiment can establish that a benchmark cannot. A builtin
-would take the `Value` block it was handed and match on it in place, with no
-serialisation at either end, which is the 28 milliseconds. Adding one means
-a `src/library/Parse.nim` and a line in `src/vm/vm.nim`, which is a change
-to Arturo and therefore upstream's call to make.
+thing an FFI experiment can establish that a benchmark cannot. Three modes,
+same grammar, same corpus, same 287 definitions:
+
+| | Corpus time | |
+| --- | ---: | --- |
+| `scan` | 22.66 s | pure Arturo, the reference |
+| `scanFast` | 1.70 s | the shared library, no change to Arturo |
+| the core on values it already holds | 0.028 s | what direct access would expose |
+
+A builtin would take the `Value` block it was handed and match on it in
+place, with no serialisation at either end, which is the third row. Adding
+one means a `src/library/Parse.nim` and a line in `src/vm/vm.nim`, which is
+a change to Arturo and therefore upstream's call to make.
 
 ## What does not
 

@@ -124,7 +124,9 @@ Reaching that speed from Arturo needs a builtin, which would mean changing
 Arturo, so this package does not. Going through the FFI instead spends
 almost everything on serialisation: 1.5 seconds to render the input against
 0.08 to cross the boundary and match, after three rounds of making the
-rendering faster. The measurement, and what it argues, is in
+rendering faster. That is still worth having, at about thirteen times the
+interpreted matcher, and it is still 25 times short of what the core does
+on values it already holds. The measurement, and what it argues, is in
 [nim/README.md](nim/README.md).
 
 ## Running everything
