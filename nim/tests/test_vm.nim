@@ -332,12 +332,12 @@ suite "matching Arturo source":
 
 suite "quote":
     test "quote matches a value literally":
-        let gg = g(alt(sq(Node(kind: nkQuote, literal: "9"), Node(kind: nkSkip))))
+        let gg = g(alt(sq(Node(kind: nkQuote, literal: iInt(9)), Node(kind: nkSkip))))
         check scanQ(gg, @[iInt(9), iInt(1)])
         check not scanQ(gg, @[iInt(8), iInt(1)])
 
     test "quote matches a symbolliteral, which the interpreter cannot":
         # bugs/symbolliteral-equality.art: on 0.10.0 `'+ = '+` is false, so the
         # interpreted matcher cannot match one. Structural equality here can.
-        let gg = g(alt(sq(Node(kind: nkQuote, literal: "'+"))))
+        let gg = g(alt(sq(Node(kind: nkQuote, literal: iSymLit("+")))))
         check scanQ(gg, @[iSymLit("+")])

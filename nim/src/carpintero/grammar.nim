@@ -12,7 +12,7 @@
 ## both run the same grammar.
 
 import std/[tables, unicode]
-import charset
+import charset, items
 
 type
     NodeKind* = enum
@@ -72,7 +72,7 @@ type
         of nkDefer:
             blockId*: int
         of nkQuote:
-            literal*: string
+            literal*: Item
         of nkSkip, nkEnd, nkCut:
             discard
 

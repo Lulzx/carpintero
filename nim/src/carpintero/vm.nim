@@ -61,6 +61,7 @@ type
 
     Capture* = object
         name*: string
+        kind*: CapKind        ## a collect reports its list even when empty
         value*: CapValue
         collected*: seq[CapValue]
 
@@ -142,7 +143,7 @@ proc describe(p: Program, ins: Instr): string =
     of opEndInput: "end of input"
     of opTypeTerm: p.names[ins.arg]
     of opWordTerm: "word " & p.names[ins.arg]
-    of opQuote: "quoted " & p.names[ins.arg]
+    of opQuote: "quoted " & $p.lits[ins.arg]
     of opInto: "a nested block"
     of opIntoEnd: "end of nested block"
     else: "input"
@@ -290,10 +291,10 @@ proc run*(prog: Program, src: Source): MatchResult =
             var hit = false
             if pos < n:
                 let e = elem()
-                # a `'word` terminal matches the word by name, whichever of
-                # the word-ish kinds the lexer produced
-                hit = e.kind in {itWord, itLabel, itLiteral} and
-                      e.s == prog.names[ins.arg]
+                # only a `:word`. The interpreted matcher guards this with
+                # `word?`, so a label or a literal of the same name does not
+                # match, and the compiled core must not be more generous.
+                hit = e.kind == itWord and e.s == prog.names[ins.arg]
             if hit:
                 inc pos
                 inc pc
@@ -303,13 +304,17 @@ proc run*(prog: Program, src: Source): MatchResult =
         of opQuote:
             if not isBlock:
                 raise newException(ValueError, "carpintero: quote needs block input")
-            # Structural equality, which is a deliberate divergence: the
-            # interpreted matcher compares with Arturo's `=`, and on 0.10.0 a
-            # :symbolliteral is not equal to itself, so `quote '+` cannot
-            # match there and can here. See items.nim.
+            # Structural equality against the quoted value itself, not
+            # against a rendering of it: Arturo prints a :symbolliteral `'+`
+            # as `+` and a :literal `'foo` as `foo`, so comparing text would
+            # conflate them with the symbol and the word of the same name.
+            #
+            # Deliberate divergence: the interpreted matcher compares with
+            # Arturo's `=`, and on 0.10.0 a :symbolliteral is not equal to
+            # itself, so `quote '+` cannot match there and can here.
             var hit = false
             if pos < n:
-                hit = $elem() == prog.names[ins.arg]
+                hit = elem() == prog.lits[ins.arg]
             if hit:
                 inc pos
                 inc pc
@@ -466,7 +471,7 @@ proc run*(prog: Program, src: Source): MatchResult =
             for e in m.log:
                 case e.kind
                 of lgOpen:
-                    result.caps.add(Capture(name: prog.names[e.name]))
+                    result.caps.add(Capture(name: prog.names[e.name], kind: e.cap))
                     stack.add((result.caps.len - 1, e))
                     if e.cap == ckCollect: collecting.add(result.caps.len - 1)
                 of lgClose:

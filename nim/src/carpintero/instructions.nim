@@ -11,7 +11,7 @@
 ## enough that the hot loop stays in cache.
 
 import std/unicode
-import charset
+import charset, items
 
 type
     OpKind* = enum
@@ -72,6 +72,7 @@ type
         strs*: seq[seq[Rune]]     ## text literals, as codepoints
         names*: seq[string]       ## capture and rule names, type and word terminals
         msgs*: seq[string]        ## `fail` messages
+        lits*: seq[Item]          ## values matched literally by `quote`
         entry*: int32             ## address of the start rule
 
 proc instr*(op: OpKind, arg: int32 = 0, aux: int32 = 0): Instr {.inline.} =
@@ -109,6 +110,12 @@ proc poolName*(p: var Program, s: string): int32 =
     result = int32(p.names.len)
     p.names.add(s)
 
+proc poolLit*(p: var Program, it: Item): int32 =
+    for i, existing in p.lits:
+        if existing == it: return int32(i)
+    result = int32(p.lits.len)
+    p.lits.add(it)
+
 proc poolMsg*(p: var Program, s: string): int32 =
     result = int32(p.msgs.len)
     p.msgs.add(s)
@@ -139,6 +146,8 @@ proc `$`*(p: Program): string =
             result.add(" (" & $CapKind(ins.aux) & ")")
         of opTypeTerm, opWordTerm:
             result.add(" " & p.names[ins.arg])
+        of opQuote:
+            result.add(" " & $p.lits[ins.arg])
         of opFailMsg:
             result.add(" \"" & p.msgs[ins.arg] & "\"")
         of opDefer:

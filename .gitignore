@@ -1,7 +1,9 @@
 .DS_Store
 *.output
 docs/
+nim/adapter/cases.json
 nim/nimcache/
+nim/tests/differential
 nim/tests/dis
 nim/tests/test_vm
 site/

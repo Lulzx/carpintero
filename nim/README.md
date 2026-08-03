@@ -10,10 +10,28 @@ nim c --hints:off -r tests/test_vm.nim
 
 Nothing here links against Arturo. The VM is built and tested on its own so
 that it can be developed without a working Arturo build, and so that the rule
-tree it consumes can double as an interchange format: the interpreted side
-writes a grammar out, the compiled side reads it, and both run the same
-grammar over the same input. That is the differential test the proposal asks
-for, and the reason the two halves share no code.
+tree it consumes can double as an interchange format.
+
+That interchange is now built, and it is what makes the two halves worth
+having separately:
+
+```
+arturo nim/adapter/cases.art nim/adapter/cases.json
+cd nim && nim c --hints:off -r tests/differential.nim adapter/cases.json
+```
+
+`adapter/export.art` writes a grammar, an input, and what the interpreted
+matcher made of them. `src/carpintero/load.nim` reads all three back, and
+`tests/differential.nim` reruns the grammar here and checks the two engines
+agree. 51 cases, no disagreements. Because each case carries the interpreted
+answer with it, this compares two engines rather than comparing one engine
+against something hand-written, so a disagreement is a real disagreement
+about the language.
+
+The format is tagged rather than inferred. Two Arturo values can print
+identically and match differently: `'+` prints as `+` and so does the symbol
+`+`, and `quote` has to tell them apart, so every value carries its kind and
+nothing is reconstructed from a rendering.
 
 ## What runs
 
@@ -50,8 +68,14 @@ block ids in match order, but nothing runs them, since running one means
 calling back into Arturo. Memoization is not wired up. Neither is the
 `opSpan` charset-run optimisation, which is emitted nowhere yet.
 
-Nothing is wired into Arturo, so the `Item` type stands in for `Value` and
-the adapter between them is unwritten.
+Nothing is wired into Arturo as a builtin. The `Item` type stands in for
+`Value`, and the adapter between them goes through JSON rather than through
+memory, which is right for testing and wrong for shipping.
+
+The differential corpus is 51 hand-written cases, not Arturo's source tree.
+Running both engines over the 173-file corpus needs the adapter pointed at
+lexed files rather than at cases, which is the next step and is now
+mechanical.
 
 ## Deliberate divergences
 
@@ -74,6 +98,7 @@ the compiled version made the gap obvious.
 | --- | --- |
 | `charset.nim` | ASCII bitmap plus sorted ranges above it, union, intersection, complement |
 | `items.nim` | Block elements: the subset of Arturo's `Value` the matcher inspects |
+| `load.nim` | Reading the interchange format back: values, grammars, whole cases |
 | `instructions.nim` | The opcodes, the program with its literal pools, and a disassembler |
 | `grammar.nim` | The rule tree, and nullability by fixpoint |
 | `compile.nim` | Tree to program, and Ford's well-formedness check |

@@ -51,10 +51,14 @@ proc scan*(prog: Program, src: Source, prefix = false): ScanResult =
     result.ok = true
     result.defers = r.defers
     for c in r.caps:
-        if c.name.len > 0:
+        if c.name.len == 0: continue
+        # a collect reports its list, empty or not; anything else reports the
+        # span it crossed. Splitting on whether the value happens to be a list
+        # cannot work for block input, where an ordinary capture is one too.
+        if c.kind == ckCollect:
+            result.collected[c.name] = c.collected
+        else:
             result.captures[c.name] = c.value
-            if c.collected.len > 0:
-                result.collected[c.name] = c.collected
 
 proc scan*(prog: Program, input: string, prefix = false): ScanResult {.inline.} =
     scan(prog, Source(kind: skText, text: input.toRunes), prefix)

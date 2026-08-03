@@ -1,0 +1,102 @@
+;; cases.art — generate the differential corpus.
+;;
+;;     arturo nim/adapter/cases.art nim/adapter/cases.json
+;;
+;; Each case is a grammar, an input, and what the interpreted matcher made
+;; of the two. The Nim runner reruns the grammar against the input and
+;; checks that it agrees. Cases are written here rather than in Nim so that
+;; the interpreted side, which is the specification, is the one that decides
+;; what the answer is.
+
+import ./"export.art"!
+
+digit: charset "0-9"
+lower: charset "a-z"
+alnum: csUnion digit lower
+
+date:  [capture 'year [4 digit] "-" capture 'month [2 digit] "-" capture 'day [2 digit]]
+word:  [some lower]
+words: [collect 'words [some [keep word | skip]]]
+
+defn: [:label 'function :block]
+walk: [any [keep defn | into walk | skip]]
+
+CASES: @[
+    ;; terminals and quantifiers
+    caseTree "literal"          ["hello"]                      "hello"
+    caseTree "literal-short"    ["hello"]                      "hell"
+    caseTree "literal-long"     ["hello"]                      "helloo"
+    caseTree "charset"          [some digit]                   "12345"
+    caseTree "charset-empty"    [some digit]                   ""
+    caseTree "charset-union"    [some alnum]                   "a1b2"
+    caseTree "exactly-n"        [4 digit]                      "2026"
+    caseTree "exactly-n-short"  [4 digit]                      "202"
+    caseTree "between"          [between 2 4 digit]            "123"
+    caseTree "between-under"    [between 2 4 digit]            "1"
+    caseTree "between-over"     [between 2 4 digit]            "12345"
+    caseTree "any-none"         [any digit]                    ""
+    caseTree "skip-end"         [skip end]                     "z"
+
+    ;; ordered choice, and the pitfalls the manual documents
+    caseTree "hidden-prefix"    ["a" | "ab"]                   "ab"
+    caseTree "longest-first"    ["ab" | "a"]                   "ab"
+    caseTree "backtrack-arm"    ["ab" "c" | "ab" "d"]          "abd"
+    caseTree "greedy-no-give"   [some "a" "a"]                 "aaa"
+
+    ;; lookahead
+    caseTree "not"              [not digit skip]               "x"
+    caseTree "not-fails"        [not digit skip]               "5"
+    caseTree "ahead"            [ahead "ab" "abc"]             "abc"
+    caseTree "ahead-captures"   [ahead [capture 'peek "ab"] "abc"]  "abc"
+    caseTree "not-discards"     [not [capture 'nope "zz"] "abc"]    "abc"
+
+    ;; advance
+    caseTree "to"               [capture 'h to "," skip any skip]   "abc,def"
+    caseTree "thru"             [capture 'h thru "," any skip]      "abc,def"
+
+    ;; captures, and the rollback that diverges from Rebol
+    caseTree "date"             date                           "2026-08-03"
+    caseTree "date-bad"         date                           "2026-08-0x"
+    caseTree "nested-capture"   [capture 'outer [capture 'inner "a" "b"]]  "ab"
+    caseTree "repeated-capture" [some [capture 'c skip]]       "aaab"
+    caseTree "dead-capture"     [capture 'x "ab" "!" | capture 'y "abc"]   "abc"
+    caseTree "empty-capture"    [capture 'e []]                ""
+
+    ;; the progress guard, and what a stalled iteration must not leave
+    caseTree "guard-any"        [any [opt "a"] "xy"]           "xy"
+    caseTree "guard-capture"    [some [capture 'x opt "a"]]    "a"
+    caseTree "guard-keep"       [collect 'c [some [keep [opt skip]]]]      "ab"
+
+    ;; collect and keep
+    caseTree "words"            words                          "one, two, three"
+    caseTree "collect-empty"    [collect 'c [any [keep digit | skip]]]     "abc"
+
+    ;; cut
+    caseTree "cut-commits"      ["a" cut "b" | "a" "c"]        "ac"
+    caseTree "cut-succeeds"     ["a" cut "b" | "a" "c"]        "ab"
+    caseTree "no-cut"           ["a" "b" | "a" "c"]            "ac"
+    caseTree "cut-nested-group" [["a" cut "b"] "c" | "a" "b" "z"]  "abz"
+
+    ;; block input
+    caseTree "type-term"        [:integer]                     @[42]
+    caseTree "type-mismatch"    [:integer]                     @["42"]
+    caseTree "word-term"        ['function]                    @[first [function]]
+    caseTree "word-vs-label"    ['greet]                       @[first [greet:]]
+    caseTree "string-element"   ["ab"]                         @["ab"]
+    caseTree "into-full"        [into [:integer :integer]]     [[1 2]]
+    caseTree "into-partial"     [into [:integer :integer]]     [[1 2 3]]
+    caseTree "into-capture"     [into [capture 'inner [:integer :integer]]]  [[7 8]]
+    caseTree "into-deep-fail"   [skip into [:integer :string]] [0 [1 2]]
+
+    ;; matching Arturo source, which is the reason the dialect exists
+    caseTree "funcdef"          [capture 'name :label 'function capture 'params :block capture 'body :block]
+                                [greet: function [name] [print name]]
+    caseTree "walk-nested"      [collect 'defs walk]
+                                [outer: function [] [inner: function [] []]]
+    caseTree "walk-flat"        [collect 'defs walk]
+                                [a: function [] [] b: function [] []]
+]
+
+out: (empty? arg)? -> "nim/adapter/cases.json" -> last arg
+discard writeCases out CASES
+print ["wrote" size CASES "cases to" out]

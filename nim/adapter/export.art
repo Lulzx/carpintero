@@ -1,0 +1,225 @@
+;; export.art — the seam between the two implementations.
+;;
+;; The interpreted matcher walks Arturo blocks directly. The compiled core
+;; cannot, so this writes a grammar and its input out as JSON in the shape
+;; the Nim loader reads. Both engines then run the same grammar over the
+;; same input, which is what makes a disagreement between them informative
+;; rather than a difference in what they were asked.
+;;
+;; Two trees come out of here. A rule block becomes a normalized grammar
+;; tree, where each block is an alternation of sequences and each keyword
+;; carries its operands as children instead of as following block entries.
+;; A lexed block becomes a tagged value tree.
+;;
+;; Type names are written with a leading colon, so :integer reads the way
+;; the manual writes it, though to :string on a type in 0.10.0 gives the
+;; bare word.
+
+import ./"../../carpintero.art"!
+
+;; ── values ───────────────────────────────────────────────────────────
+
+itemTree: function [v][
+    t: to :string type v
+    if t = "block" [
+        return #[k: "block" v: map v 'e -> itemTree e]
+    ]
+    if t = "dictionary" [
+        ks: keys v
+        parts: []
+        i: 0
+        n: size ks
+        while [i < n][
+            kk: ks\[i]
+            parts: append parts @[@[kk itemTree v\[kk]]]
+            i: i + 1
+        ]
+        return #[k: "dictionary" v: parts]
+    ]
+    if t = "integer"  -> return #[k: "integer" v: v]
+    if t = "floating" -> return #[k: "floating" v: v]
+    if t = "logical"  -> return #[k: "logical" v: v]
+    if t = "null"     -> return #[k: "null" v: ""]
+    if t = "string"   -> return #[k: "string" v: v]
+    if t = "char"     -> return #[k: "char" v: to :integer v]
+    if t = "type"     -> return #[k: "type" v: ~":|to :string v|"]
+    ; the word-ish kinds all render to their bare name, which is what the
+    ; matcher compares, so the tag carries the distinction instead
+    if in? t ["word" "label" "literal" "symbol" "symbolliteral"] [
+        return #[k: t v: to :string v]
+    ]
+    panic ~"export: cannot serialize a |t|"
+]
+
+;; ── grammars ─────────────────────────────────────────────────────────
+
+;; one element at idx, as a node, using the same span table the matcher
+;; dispatches on so the two cannot disagree about where an element ends
+elemTree: function [items idx][
+    it: items\[idx]
+
+    if block? it -> return blockTree it
+
+    if integer? it [
+        return #[k: "rep" count: it body: elemTree items idx + 1]
+    ]
+
+    if word? it [
+        w: to :string it
+        unless key? KWCODE it -> return #[k: "rule" name: w]
+        k: KWCODE\[it]
+        kd: SPANKIND\[k]
+
+        if w = "skip" -> return #[k: "skip"]
+        if w = "end"  -> return #[k: "end"]
+        if w = "cut"  -> return #[k: "cut"]
+
+        if kd = 1 [
+            return #[k: w body: elemTree items idx + 1]
+        ]
+        if kd = 2 [
+            nm: items\[idx + 1]
+            return #[k: w name: to :string nm body: elemTree items idx + 2]
+        ]
+        if kd = 3 [
+            return #[k: "between"
+                     lo: items\[idx + 1]
+                     hi: items\[idx + 2]
+                     body: elemTree items idx + 3]
+        ]
+        ; kd = 4: the word and one literal value
+        v: items\[idx + 1]
+        if w = "fail"  -> return #[k: "fail" msg: to :string v]
+        if w = "quote" -> return #[k: "quote" v: itemTree v]
+        ; do and defer carry host code, which the compiled core cannot run.
+        ; They are exported as ids so a grammar containing one still round
+        ; trips, and the differential runner skips comparing those effects.
+        return #[k: w id: 0]
+    ]
+
+    if string? it -> return #[k: "str" v: it]
+    if char? it   -> return #[k: "char" v: to :integer it]
+    if type? it   -> return #[k: "type" name: ~":|to :string it|"]
+    if literal? it -> return #[k: "word" name: to :string it]
+
+    if dictionary? it [
+        if key? it 'kind [
+            if it\kind = 'charset [
+                rngs: it\ranges
+                return #[k: "set" ranges: map rngs 'r -> @[r\0 r\1]]
+            ]
+        ]
+    ]
+
+    panic ~"export: cannot serialize a rule element of type |to :string type it|"
+]
+
+;; a block: alternatives split on the bar, each alternative a sequence.
+;; Every block becomes an alternation even when it holds no bar, because
+;; cut commits the innermost enclosing *block* and the compiler needs
+;; that boundary to survive the translation.
+blockTree: function [blk][
+    arms: []
+    cur: []
+    n: size blk
+    i: 0
+    while [i < n][
+        it: blk\[i]
+        isBar: false
+        if symbol? it [ isBar: it = BAR ]
+        if isBar [
+            arms: append arms @[#[k: "seq" items: cur]]
+            cur: []
+            i: i + 1
+        ]
+        unless isBar [
+            cur: append cur @[elemTree blk i]
+            i: i + elemSpan blk i
+        ]
+    ]
+    arms: append arms @[#[k: "seq" items: cur]]
+    #[k: "alt" arms: arms]
+]
+
+;; the names bound by a collect, which is not decidable from the result:
+;; under block input an ordinary capture yields a block too, so the value's
+;; type cannot tell the two apart. The grammar can.
+collectNames: function [node acc][
+    k: node\k
+    if k = "collect" [ acc: append acc node\name ]
+    if k = "alt" [
+        arms: node\arms
+        i: 0
+        n: size arms
+        while [i < n][ acc: collectNames arms\[i] acc  i: i + 1 ]
+    ]
+    if k = "seq" [
+        its: node\items
+        i: 0
+        n: size its
+        while [i < n][ acc: collectNames its\[i] acc  i: i + 1 ]
+    ]
+    if key? node 'body [ acc: collectNames node\body acc ]
+    acc
+]
+
+;; every named rule the start rule can reach, resolved the way the
+;; matcher resolves them
+grammarTree: function [rule][
+    reg: checkGrammar rule
+    rules: #[]
+    ks: keys reg
+    i: 0
+    n: size ks
+    while [i < n][
+        k: ks\[i]
+        v: reg\[k]
+        if block? v [ rules\[k]: blockTree v ]
+        unless block? v [ rules\[k]: elemTree @[v] 0 ]
+        i: i + 1
+    ]
+    #[start: blockTree rule  rules: rules]
+]
+
+;; ── whole cases ──────────────────────────────────────────────────────
+;; A case is a grammar, an input, and what the interpreted matcher made
+;; of it. The Nim side reruns the first two and checks the third.
+
+caseTree: function [name rule input][
+    gt: grammarTree rule
+    cns: collectNames gt\start []
+    rks: keys gt\rules
+    j: 0
+    m: size rks
+    while [j < m][ cns: collectNames gt\rules\[rks\[j]] cns  j: j + 1 ]
+
+    r: scan input rule
+    ok: not? null? r
+    caps: #[]
+    coll: #[]
+    if ok [
+        ks: keys r
+        i: 0
+        n: size ks
+        while [i < n][
+            k: ks\[i]
+            v: r\[k]
+            if in? k cns [ coll\[k]: map v 'e -> itemTree e ]
+            unless in? k cns [ caps\[k]: itemTree v ]
+            i: i + 1
+        ]
+    ]
+    inp: (block? input)? -> #[kind: "block" v: map input 'e -> itemTree e]
+                         -> #[kind: "text" v: input]
+    #[name: name
+      grammar: gt
+      input: inp
+      ok: ok
+      captures: caps
+      collected: coll]
+]
+
+writeCases: function [path cases][
+    write.json cases path
+    true
+]

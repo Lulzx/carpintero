@@ -49,6 +49,19 @@ if command -v nim > /dev/null 2>&1; then
     echo
     echo "== nim/tests/test_vm.nim =="
     (cd nim && nim c --hints:off -r tests/test_vm.nim 2>&1 | tail -3) || fails=$((fails + 1))
+
+    # The differential run is the one that compares the two engines rather
+    # than either engine against a written-down expectation. Cases carry the
+    # interpreted answer with them, so they are regenerated first.
+    echo
+    echo "== differential =="
+    if arturo nim/adapter/cases.art nim/adapter/cases.json > /dev/null 2>&1; then
+        (cd nim && nim c --hints:off -r tests/differential.nim adapter/cases.json 2>&1 | tail -6) \
+            || fails=$((fails + 1))
+    else
+        echo "  could not generate the case corpus"
+        fails=$((fails + 1))
+    fi
 else
     echo
     echo "== nim: skipped, no nim on PATH =="

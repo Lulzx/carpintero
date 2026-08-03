@@ -282,7 +282,7 @@ proc emit(c: var Ctx, n: Node) =
         discard c.p.add(opWordTerm, c.p.poolName(n.name))
 
     of nkQuote:
-        discard c.p.add(opQuote, c.p.poolName(n.literal))
+        discard c.p.add(opQuote, c.p.poolLit(n.literal))
 
 # ── left recursion ───────────────────────────────────────────────────────
 # Ford's well-formedness check, the same one the interpreted pre-pass runs:
