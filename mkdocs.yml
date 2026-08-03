@@ -1,6 +1,6 @@
 site_name: Carpintero
 site_description: A PARSE-class grammar dialect for Arturo — rules that compose, nest, recurse, and match blocks as well as strings.
-site_url: https://lulzx.github.io/carpintero/
+site_url: https://lulzx.com/carpintero/
 repo_url: https://github.com/Lulzx/carpintero
 repo_name: Lulzx/carpintero
 copyright: Carpintero — a grammar dialect for Arturo
