@@ -178,6 +178,19 @@ discard t "progress guard on some" scan? "xy" [some [opt "a"] "xy"] true
 discard t "progress guard on empty string body" scan? "z" [any "" "z"] true
 discard t "progress guard on between" scan? "z" [between 0 9 [opt "a"] "z"] true
 
+;; the guard has to fire on the iteration that made no progress, not one
+;; iteration later: a loop that runs its body an extra time at the same
+;; position runs any escape inside it twice and logs a second, empty
+;; capture over the real one
+PG: #[n: 0]
+PG\n: 0
+discard scan "" [any [do [PG\n: PG\n + 1] opt "a"]]
+discard t "nullable body runs once on empty input" PG\n 1
+pg1: scan "a" [some [capture 'x opt "a"]]
+discard t "the empty tail iteration does not clobber the capture" pg1\x "a"
+pg2: scan "ab" [collect 'c [some [keep [opt skip]]]]
+discard t "the empty tail iteration keeps nothing" size pg2\c 2
+
 ;; ── to, thru, skip, end ──────────────────────────────────────────────
 discard section "advance"
 
@@ -496,6 +509,19 @@ discard scan "c" ["a" | "b"]
 e9: scanError
 discard t "expected lists both arms" (in? "literal a" e9) true
 discard t "expected lists the second arm" (in? "literal b" e9) true
+
+;; a grammar that matches a prefix and stops short fails, and the report
+;; has to name that rather than whatever speculative terminal died
+;; furthest along in an arm that was abandoned
+discard scan "abc" [["a" "z"] | "a"]
+e10: scanError
+discard t "trailing input is reported" (in? "end of input" e10) true
+
+;; every ordinary match failure goes through the one reporting path, so
+;; a failed quote is describable like any other terminal
+discard scan @[1 2] [quote 9 skip]
+e11: scanError
+discard t "a failed quote is reported" (in? "quoted 9" e11) true
 
 ;; ── grammar errors ───────────────────────────────────────────────────
 discard section "grammar errors"

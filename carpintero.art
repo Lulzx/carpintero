@@ -674,9 +674,13 @@ matchElem: function [items idx pos][
         ]
         if k = 18 [
             unless CS\isblk -> panic "carpintero: quote needs block input"
-            if pos >= CS\len -> return null
             v: items\[idx + 1]
-            return ((CS\inp\[pos]) = v)? -> pos + 1 -> null
+            ; rendered eagerly rather than passed as a value and a kind:
+            ; a quoted item can be a word bound to a function, and
+            ; interpolating one of those in the description would call it
+            qd: ~"quoted |to :string v|"
+            if pos >= CS\len -> return failAt pos DTEXT qd
+            return ((CS\inp\[pos]) = v)? -> pos + 1 -> failAt pos DTEXT qd
         ]
         ; k = 19, fail
         panic ~"carpintero: |items\[idx + 1]| at position |pos|"
@@ -762,6 +766,11 @@ matchMany: function.inline [qItems qIdx qPos qNeed][
         ]
         return (qNeed)? -> null -> qPos
     ]
+    ; the progress guard fires here, not after a second identical
+    ; iteration: an iteration that matched without consuming ends the
+    ; loop, and running the body again to discover that costs a second
+    ; set of captures and a second run of any escape inside it
+    if qP = qPos -> return qP
     qGo: true
     while [qGo][
         qSz: size CS\log
@@ -774,9 +783,19 @@ matchMany: function.inline [qItems qIdx qPos qNeed][
             ]
         ]
         unless null? qP2 [
-            unless qP2 = qP [
+            ; taken before qP moves, or the test below reads the value
+            ; it was just assigned
+            qAdv: qP2 <> qP
+            if qAdv [
                 qP: qP2
                 qGo: true
+            ]
+            ; the iteration that ends the loop is not taken, so what it
+            ; logged goes with it
+            unless qAdv [
+                if (size CS\log) > qSz [
+                    CS\log: (qSz = 0)? -> [] -> slice CS\log 0 qSz - 1
+                ]
             ]
         ]
     ]
@@ -798,10 +817,16 @@ matchBetween: function.inline [wItems wIdx wPos wLo wHi][
             ]
         ]
         unless null? wP2 [
-            unless wP2 = wP [
+            wAdv: wP2 <> wP
+            if wAdv [
                 wP: wP2
                 wCnt: wCnt + 1
                 wGo: true
+            ]
+            unless wAdv [
+                if (size CS\log) > wSz [
+                    CS\log: (wSz = 0)? -> [] -> slice CS\log 0 wSz - 1
+                ]
             ]
         ]
     ]
@@ -1136,7 +1161,14 @@ scan: function [input rule][
     CS\ncuts: 0
     p: matchBlock rule 0
     if null? p -> return null
-    if and? (null? pfx) (p <> CS\len) -> return null
+    ; a prefix that matched and stopped short is a failure, and the
+    ; report has to say so: without this the high-water mark still holds
+    ; whatever speculative terminal died furthest along, which for a
+    ; grammar that simply ran out of rules is never the real reason
+    if and? (null? pfx) (p <> CS\len) [
+        discard failAt p DTEXT "end of input"
+        return null
+    ]
     caps: #[]
     cnames: []
     citems: []
