@@ -363,21 +363,25 @@ source line with a caret under the column. Failures inside the operand of
 grammar succeeding. Direct left recursion
 (`expr: [expr "+" digit | digit]`), indirect left recursion through a
 nullable prefix, and unbound rule words are all rejected at scan start with
-messages naming the cycle or the word. Writing it also surfaced three
+messages naming the cycle or the word. Writing it also surfaced two
 interpreter bugs worth filing upstream, which is what dogfooding is for
 (minimal repros in `bugs/`): the 0.10.0 lexer does not fully ignore comment
-contents (a `\-` inside a comment hangs it), a function call whose result
-is discarded can leak that value into the argument stream of an enclosing
-call, and binding the result of an expression that produces no value (an
-assignment, a `set`, a call to a function whose body ends in one)
-corrupts the enclosing frame, usually as a silent exit. The third was
+contents (a `\-` inside a comment hangs it), and binding the result of an
+expression that produces no value (an assignment, a `set`, a call to a
+function whose body ends in one) corrupts the enclosing frame, usually as a
+silent exit. The second was
 misdiagnosed twice, first as "escape blocks cannot assign", which
 accidentally enforced this proposal's own "escapes should compute, not
 mutate" rule, then as a property of `do`. The real trigger is the
 binding, and the draft sidesteps it by evaluating every escape block
 padded with a trailing value (`op ++ [true]`) and discarding the result,
-so escapes may in fact assign freely. The unused-result leak is likewise avoided
-with the language's own `discard` rather than dummy assignments. Even
+so escapes may in fact assign freely. A third repro sits beside those two and
+is not a bug: a value left unused inside a function is popped as an argument
+by the call enclosing it, which is the value stack working as designed. The
+draft had it filed as a `return` bug until the plain reading was pointed
+out. Passing every unused result through the language's own
+`discard` settles it, and the open question is only that the argument the
+leftover displaces is dropped without a word. Even
 the lexer bug has an in-language mitigation, and it is the most
 Carpintero-shaped fix imaginable: `read` returns raw source without
 lexing anything, so `loadSafe` strips comments at the string level

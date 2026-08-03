@@ -198,7 +198,7 @@ own tree. On a megabyte of source, stripping comments never once changed the
 program the lexer builds, and a five-line block grammar found all 287
 function definitions at every nesting depth. [The write-up is in the
 manual](MANUAL.md#validation-against-arturos-own-source), including the
-fourth interpreter bug it turned up.
+interpreter bug it turned up.
 
 `bench.art` is the Phase 3 benchmark: `scan` losing to the native regex
 engine by the expected orders of magnitude, memoization collapsing a
@@ -207,12 +207,15 @@ and a half, and a cost per kilobyte that stays flat as the input doubles.
 
 ## Interpreter bugs
 
-[`bugs/`](bugs/README.md) has minimal repros for four Arturo 0.10.0
-interpreter bugs: a comment that hangs the lexer, discarded call results
-leaking into argument passing, a value-less binding that exits 1 silently,
-and a `:symbolliteral` that is not equal to itself. Three were found by
-writing the dialect and the fourth by running it over Arturo's own test
-suite. Each has an in-language workaround, used in `carpintero.art`.
+[`bugs/`](bugs/README.md) has minimal repros for three Arturo 0.10.0
+interpreter bugs: a comment that hangs the lexer, a value-less binding that
+exits 1 silently, and a `:symbolliteral` that is not equal to itself. The
+first two were found by writing the dialect and the third by running it over
+Arturo's own test suite. A fourth repro is filed alongside them and is not a
+bug: a value left unused inside a callee is popped as an argument by the
+enclosing call, which is the value stack working as designed, and the open
+question there is that the argument it displaces is discarded without a
+word. Each has an in-language workaround, used in `carpintero.art`.
 
 ## Reading
 

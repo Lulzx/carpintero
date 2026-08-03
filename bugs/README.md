@@ -1,4 +1,4 @@
-# Arturo 0.10.0 interpreter bugs
+# Arturo 0.10.0 interpreter bugs and sharp edges
 
 Found while building the Carpintero grammar-dialect draft (`../carpintero.art`)
 on Arturo 0.10.0 "Arizona Bark" (arm64/macos, Homebrew), and while running it
@@ -6,7 +6,9 @@ over Arturo's own source tree. Each `.art` file is a minimal self-contained
 repro, and each `issue-*.md` is a draft report ready for
 `arturo-lang/arturo`. Not filed yet.
 
-The first three were found by writing the dialect. The fourth was found by
+Three are bugs. Number 2 turned out to be the value stack behaving as
+designed, and its draft is now a documentation question rather than a bug
+report. The first three were found by writing the dialect, the fourth by
 *using* it, in the corpus run described in
 [the manual](../MANUAL.md#validation-against-arturos-own-source). All four have
 in-language mitigations. Each section names its fix.
@@ -30,20 +32,31 @@ provides this as `stripComments`/`loadSafe` (the stripper is itself a
 Carpintero grammar), and `../examples/safeload.art` runs this very repro file
 through it, successfully.
 
-## 2. `discarded-return-leak.art`: discarded call results corrupt argument passing
+## 2. `stack-leftover-args.art`: a leftover inside a callee displaces the caller's argument
 
-When a function is called as an argument to another call, and *inside* it a
-call's result is discarded (most reliably a value produced by an early
-`return` in the callee, or `loop` over an empty collection), the discarded
-value leaks into the enclosing call's argument stream: the next argument
-slot receives the leaked value and the real argument is lost.
+**Not a bug.** A value left unused inside a function body is popped as an
+argument by the call that encloses it, and the argument already written in
+that slot is dropped. That is the value stack doing what it is documented to
+do: `7` on its own line, followed by an argless `print`, prints 7, and the
+same stack serves both. Nothing leaks anywhere. The argument was sitting
+deeper in the stack than the callee's leftover.
 
-Run: `arturo discarded-return-leak.art`.
-Expected: `expected: 42`, actual: `expected: 7`.
+`return` is not the trigger either, which is what the first two drafts of
+this section claimed. A bare literal in the body behaves identically, as do
+an ordinary call and a fallthrough value; `loop` over an empty collection is
+the same rule with a `null`.
+
+What is left is the question in `issue-2-stack-leftovers.md`: the displaced
+argument is not consumed later, it is discarded silently at the end of the
+statement, so an edit inside a callee can substitute a value into a caller's
+argument list with no diagnostic.
+
+Run: `arturo stack-leftover-args.art`.
 
 **Mitigation:** route every unused result through the `discard` builtin,
-including `discard loop items 'x [...]` for the empty-loop face, which it
-also fixes. `carpintero.art` does this throughout.
+including `discard loop items 'x [...]`. `carpintero.art` does this
+throughout, which is the language's own tool for the job rather than a
+workaround.
 
 ## 3. `valueless-assignment.art`: binding a value-less expression corrupts the frame
 
