@@ -114,8 +114,12 @@ models opaquely survive untouched.
 
 ### What that costs, and what it argues
 
-Over the corpus `scanFast` takes 1.7 seconds against `scan`'s 22.6, about
-thirteen times. `adapter/breakdown.art` says where the 1.7 goes:
+Over the corpus `scanFast` takes 1.65 seconds against `scan`'s 15.6, about
+nine and a half times. Each is timed in its own process, which matters:
+measured in one process that runs both, `scan` reports 22.5 seconds rather
+than 15.6 while `scanFast` reports the same 1.65, so the same-process ratio
+flatters the bridge by about 40%. The isolated pair is the honest one.
+`adapter/breakdown.art` says where the 1.65 goes:
 
 | Stage | Time |
 | --- | --- |
@@ -164,8 +168,8 @@ same grammar, same corpus, same 287 definitions:
 
 | | Corpus time | |
 | --- | ---: | --- |
-| `scan` | 22.66 s | pure Arturo, the reference |
-| `scanFast` | 1.70 s | the shared library, no change to Arturo |
+| `scan` | 15.6 s | pure Arturo, the reference |
+| `scanFast` | 1.65 s | the shared library, no change to Arturo |
 | the core on values it already holds | 0.028 s | what direct access would expose |
 
 A builtin would take the `Value` block it was handed and match on it in

@@ -50,6 +50,21 @@ funcdef: [
 scan code [any [funcdef | skip]]
 ```
 
+## Using it
+
+One file, no dependencies, nothing to build. Copy `carpintero.art` next to
+your script and import it:
+
+```red
+import ./"carpintero.art"!
+
+digit: charset "0-9"
+scan "2026-08-03" [capture 'year [4 digit] "-" capture 'month [2 digit] "-" capture 'day [2 digit]]
+```
+
+Arturo 0.10.0 or later. `info.art` is the `pkgr.art` manifest for whenever
+the semantics are settled enough to publish; until then it is a clone away.
+
 ## Vocabulary
 
 | Group | Words |
@@ -72,31 +87,6 @@ string with a Carpintero grammar, and `loadSafe` reads a file, strips it,
 and returns the lexed block, sidestepping the 0.10.0 lexer bug where
 comment contents can hang or corrupt the interpreter
 (`examples/safeload.art` runs a file that hangs `arturo` directly).
-
-## Semantics worth knowing
-
-All deliberate; the rationale is in [proposal.md](proposal.md).
-
-- The whole input must match. Use `scan.prefix` for prefix matching.
-- Captures and keeps **roll back** when an alternative fails, so a dead
-  parse path leaves nothing behind. This diverges from Rebol/Red on purpose.
-- Host escapes via `do` do **not** roll back and may run more than once
-  per scan, so `do` blocks should compute rather than mutate. That advice
-  stands on semantic grounds, not interpreter ones: the matcher pads escape
-  blocks with a trailing value before evaluation, so assignments and
-  zero-arity calls inside them are safe. `defer` is the sound alternative
-  for mutation: its block is queued in the capture log and runs only on
-  overall success, exactly once, in match order. Dead branches take their
-  defers with them.
-- `scan.memo: ['rule ...]` opts named rules into memoization for that
-  scan. An entry stores the end position *and* the capture-log slice,
-  replayed on a hit, so captures survive. A `do` escape inside a
-  memoized rule runs once, not once per attempt.
-- `some`/`any` stop when an iteration matches without consuming, and that
-  iteration is not taken: what it captured rolls back with it.
-- Left recursion (direct, indirect, or through a nullable prefix) is
-  rejected at scan start with a message naming the cycle.
-- Matching is case-sensitive and works on characters, not bytes.
 
 ## Two implementations
 
@@ -121,13 +111,39 @@ matcher takes 16.6 seconds of scanning and the compiled core 28
 milliseconds.
 
 Reaching that speed from Arturo needs a builtin, which would mean changing
-Arturo, so this package does not. Going through the FFI instead spends
-almost everything on serialisation: 1.5 seconds to render the input against
-0.08 to cross the boundary and match, after three rounds of making the
-rendering faster. That is still worth having, at about thirteen times the
-interpreted matcher, and it is still 25 times short of what the core does
-on values it already holds. The measurement, and what it argues, is in
+Arturo, so this package does not. `nim/adapter/fast.art` goes through the
+FFI instead, which is worth having and still not the engine:
+
+| | Corpus scan | |
+| --- | ---: | --- |
+| `scan` | 15.6 s | pure Arturo, the reference |
+| `scanFast` | 1.65 s | the shared library, no change to Arturo |
+| the core on values it already holds | 0.028 s | what direct access would expose |
+
+Almost all of the middle row is serialisation: 1.5 seconds to render the
+input against 0.08 to cross the boundary and match, after three rounds of
+making the rendering faster. The measurement, and what it argues, is in
 [nim/README.md](nim/README.md).
+
+## Semantics worth knowing
+
+Four that surprise people. All deliberate, all argued in
+[proposal.md](proposal.md), all covered in full by [MANUAL.md](MANUAL.md).
+
+- **The whole input must match.** A rule that matches a prefix and stops
+  short is a failure. `scan.prefix` is the other mode.
+- **Captures roll back.** A capture made in an alternative that later fails
+  leaves nothing behind, and the same goes for `keep`. Rebol and Red do the
+  opposite, on purpose here.
+- **`do` escapes may run more than once**, on parse paths that are later
+  abandoned, so they should compute rather than mutate. `defer` is the sound
+  alternative: queued in the capture log, run once on overall success, and
+  discarded with a dead branch.
+- **Loops cannot spin.** An iteration that matches without consuming ends
+  the loop, and is not taken: what it captured rolls back with it. Left
+  recursion is rejected at scan start with the cycle named.
+
+Matching is case-sensitive and works on characters, not bytes.
 
 ## Running everything
 

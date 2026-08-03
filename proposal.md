@@ -335,10 +335,10 @@ because its authors judged that getting the semantics right in a malleable
 medium comes first, and the same judgment applies here.
 
 Doing it this way means the design can be evaluated, argued with, and revised
-before a single line of Nim is written, and it installs with
-`arturo -p install carpintero` today with no core changes and no new
-dependencies. If the semantics turn out wrong, throwing it away costs a week
-rather than a subsystem.
+before a single line of Nim is written. It is one file with no core changes
+and no dependencies, so trying it is `import` on a clone, and it carries an
+`info.art` for `pkgr.art` whenever the semantics are worth publishing. If
+they turn out wrong, throwing it away costs a week rather than a subsystem.
 
 This is no longer hypothetical: a draft ships alongside this proposal.
 `carpintero.art` (about 800 lines) implements the Phase 0 through Phase 2
@@ -413,13 +413,14 @@ of scanning and the compiled core 28 milliseconds.
 preference.** The package changes nothing in Arturo, so the only way to
 reach the compiled core from Arturo today is `call.external`, which carries
 scalars. `nim/adapter/fast.art` does exactly that, and it is worth having:
-about thirteen times faster than the interpreted matcher over the corpus,
-with no change to Arturo at all. What it cannot do is expose the engine.
+about nine and a half times faster than the interpreted matcher over the
+corpus, with no change to Arturo at all. What it cannot do is expose the
+engine.
 
 | | Corpus time | |
 | --- | ---: | --- |
-| `scan` | 22.66 s | pure Arturo, the reference |
-| `scanFast` | 1.70 s | the shared library, no change to Arturo |
+| `scan` | 15.6 s | pure Arturo, the reference |
+| `scanFast` | 1.65 s | the shared library, no change to Arturo |
 | the core on values it already holds | 0.028 s | what direct access would expose |
 
 Three rounds of optimisation took the serialisation from 15.3 seconds to

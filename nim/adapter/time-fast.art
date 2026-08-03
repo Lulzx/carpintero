@@ -1,0 +1,31 @@
+;; time-fast.art — scanFast alone, in its own process, so the figure is not
+;; measured next to a 15-second interpreted loop in the same interpreter.
+import ./"fast.art"!
+
+defn:  [capture 'name :label ['function | 'method | quote $] opt :attribute capture 'params :block]
+walk:  [any [ keep defn | into walk | skip ]]
+allDefns: [collect 'found walk]
+
+root: first arg
+files: select list.recursive.relative root 'f -> "art" = last split.by:"." f
+blocks: []
+i: 0
+n: size files
+while [i < n][
+    blk: []
+    ok: false
+    e: try [ blk: loadSafe root ++ "/" ++ files\[i]  ok: true ]
+    if ok [ blocks: append blocks @[blk] ]
+    i: i + 1
+]
+T: #[n: 0]
+secs: benchmark.get [
+    j: 0
+    m: size blocks
+    while [j < m][
+        r: scanFast blocks\[j] allDefns
+        unless null? r [ T\n: T\n + size r\found ]
+        j: j + 1
+    ]
+]
+print ["scanFast alone:" secs "|" T\n "definitions"]
