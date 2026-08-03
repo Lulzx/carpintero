@@ -253,6 +253,10 @@ proc run*(prog: Program, src: Source): MatchResult =
             else:
                 while pos < n and prog.sets[ins.arg].contains(int32(m.src.text[pos])):
                     inc pos
+            # the loop this replaces ended on an iteration whose charset
+            # failed right here, and that failure belongs in the expected set
+            # at this position as much as any other
+            m.note(pos, describe(prog, ins))
             inc pc
 
         of opStr:

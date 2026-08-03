@@ -153,7 +153,7 @@ scripts/run-tests.sh
 | --- | --- |
 | `tests.art` | 359 checks over the interpreted matcher |
 | `tests-panics.art` | 18 grammar errors, one interpreter each |
-| `nim/tests/test_vm.nim` | 40 checks over the compiled core |
+| `nim/tests/test_vm.nim` | 46 checks over the compiled core |
 | `nim/tests/test_wire.nim` | the FFI input read both ways and compared |
 | `nim/tests/differential.nim` | 51 cases run in both engines and compared |
 | `demo.art` | 71 checks, written to be read rather than to cover |

@@ -5,6 +5,7 @@ nim/*.dylib
 nim/adapter/cases.json
 nim/libcarpintero.dylib
 nim/nimcache/
+nim/tests/bench_span
 nim/tests/differential
 nim/tests/dis
 nim/tests/test_vm

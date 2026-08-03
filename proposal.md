@@ -563,9 +563,12 @@ dialect must agree with the language about what position N means.
   15.8 seconds of scanning and the compiled core about 30 milliseconds.
   What remains splits in two. Integration is required and is upstream's:
   `Value` in place of the JSON adapter, escapes calling back into the
-  interpreter, and registering the module. Memoization and the charset-run
-  opcode are optional and only about speed, and are worth leaving until
-  after the value model settles.
+  interpreter, and registering the module. What is left after that is
+  memoization, which is optional, only about speed, and worth leaving until
+  after the value model settles. The charset-run opcode was on that list and
+  is done: a loop over a bare charset compiles to a single greedy
+  instruction, which halves `[some digit]` over a megabyte and leaves the
+  error report identical.
 
 ## Demos, in order of how convincing they are
 

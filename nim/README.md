@@ -84,7 +84,7 @@ walk: [any [keep defn | into walk | skip]]
 Both engines find the same two definitions in
 `[outer: function [] [inner: function [] []]]`, at different depths.
 
-40 tests in `tests/test_vm.nim`, written from the cases the interpreted suite
+46 tests in `tests/test_vm.nim`, written from the cases the interpreted suite
 covers rather than from the implementation, so a disagreement between them is
 a disagreement with the manual.
 
@@ -232,13 +232,11 @@ fast it is once it is one.
 **Optional, and only about speed:**
 
 - Memoization. The interpreted matcher has `scan.memo`; the compiled core
-  does not.
-- `opSpan`, a greedy charset run. The opcode exists and the compiler emits
-  it nowhere. It is the obvious win for character-level grammars like
-  `stripComments`.
+  does not. It is not worth doing before the required three, since it would
+  have to be re-tested against a different value model afterwards.
 
-Neither of the optional two is worth doing before the required three, since
-both would have to be re-tested against a different value model afterwards.
+The greedy charset run, `opSpan`, is the other thing that was on this list.
+It is done, and [what it bought](#charset-runs) is below.
 
 The corpus run compares matching, not diagnostics: the exported answer
 carries success, captures and collections, but not the farthest-failure path
@@ -286,6 +284,35 @@ the compiled version made the gap obvious.
 `tests/dis.nim` prints the program for one grammar. The compiler is the part
 most likely to be wrong, and a listing is the cheapest way to see what it
 emitted.
+
+## Charset runs
+
+A loop whose body is exactly one charset (`some digit`, `any letter`, and
+the same through a single-armed block) compiles to `Span`, which takes the
+whole run in one instruction instead of a choice point, a set test and a
+`PartialCommit` per character. This is LPeg's optimization, and it is sound
+here for the same reason: the loop form leaves exactly one backtrack entry,
+pointing past the loop, so a later failure never re-enters it with fewer
+iterations. The body captures nothing and always consumes, so there is no
+capture log to unwind and no progress guard to run.
+
+The expected set is unchanged, which is the part that does not follow from
+the above. The loop `Span` replaces ended on an iteration whose charset
+failed where the run stops, and that failure belongs in the report, so
+`Span` records the same note: `[some digit "-"]` against `"12x"` still gives
+both the charset and the literal as expected at index 2.
+
+```
+cd nim && nim c -d:release --hints:off -r tests/bench_span.nim
+```
+
+| | before | after |
+| --- | ---: | ---: |
+| `[some digit]` over 1 MB | 9.2 ms | 4.5 ms |
+| `[some letter any [" " some letter]]` over 700 kB | 11.1 ms | 8.0 ms |
+
+Character grammars are what this speeds up. The corpus run is unchanged,
+since a tree walk over block input has no charset loop in it.
 
 ## Departures from LPeg
 

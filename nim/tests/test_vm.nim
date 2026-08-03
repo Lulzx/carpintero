@@ -72,6 +72,49 @@ suite "quantifiers":
         check scanQ(nullableLoop, "")
         check scanQ(nullableLoop, "aaa")
 
+suite "charset runs":
+    ## A loop whose body is one charset lowers to Span, which consumes the
+    ## whole run in a single instruction. The tests are about the lowering
+    ## being invisible: same matches, same error report, one less loop.
+
+    test "a loop over a bare charset compiles to a run":
+        let listing = $compile(g(alt(sq(Node(kind: nkAny, body: cset(digit))))))
+        check "Span" in listing
+        check "Choice" notin listing
+
+    test "some emits the mandatory first character, then the run":
+        let listing = $compile(g(alt(sq(Node(kind: nkSome, body: cset(digit))))))
+        check listing.find("Set") < listing.find("Span")
+        check "Choice" notin listing
+
+    test "a single-armed block around the charset unwraps to the same run":
+        let listing = $compile(g(alt(sq(
+            Node(kind: nkAny, body: alt(sq(cset(digit))))))))
+        check "Span" in listing
+        check "Choice" notin listing
+
+    test "a body that is more than a charset keeps the loop":
+        let listing = $compile(g(alt(sq(
+            Node(kind: nkAny, body: alt(sq(cset(digit), str("-"))))))))
+        check "Span" notin listing
+        check "Choice" in listing
+
+    test "the run is possessive, as the loop it replaces was":
+        # `[some digit "5"]` cannot match "125": the run takes the 5 and does
+        # not give it back, which is what the loop form does too
+        let gg = g(alt(sq(Node(kind: nkSome, body: cset(digit)), str("5"))))
+        check not scanQ(gg, "125")
+        check scanQ(g(alt(sq(Node(kind: nkAny, body: cset(digit))))), "1234567")
+        check not scanQ(g(alt(sq(Node(kind: nkSome, body: cset(digit))))), "")
+
+    test "the character that ended the run is still expected there":
+        let gg = g(alt(sq(Node(kind: nkSome, body: cset(digit)), str("-"))))
+        let r = scan(gg, "12x")
+        check not r.ok
+        check r.failPath == @[2'i32]
+        check "a character in a set" in r.expected
+        check "literal -" in r.expected
+
 suite "ordered choice":
     test "first match wins, and hides a longer prefix":
         # the documented PEG pitfall: ["a" | "ab"] never matches "ab"

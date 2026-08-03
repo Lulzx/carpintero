@@ -80,6 +80,23 @@ proc emitAlt(c: var Ctx, n: Node, guarded: bool) =
     for at in commits:
         c.p.patch(at, done - at)
 
+proc spanBody(n: Node): Node =
+    ## The charset a loop body amounts to, or nil if it amounts to anything
+    ## else. A single-armed block around a one-element sequence compiles to
+    ## exactly its contents — no frame, no choice point — so `any [digit]`
+    ## unwraps to the same charset `any digit` does.
+    var cur = n
+    while cur != nil:
+        case cur.kind
+        of nkSet:
+            return cur
+        of nkAlt, nkSeq:
+            if cur.items.len != 1: return nil
+            cur = cur.items[0]
+        else:
+            return nil
+    nil
+
 proc emitLoop(c: var Ctx, body: Node, atLeastOne: bool) =
     ## `any body` is
     ##     L: Choice L_exit ; <body> ; PartialCommit L ; L_exit:
@@ -90,6 +107,20 @@ proc emitLoop(c: var Ctx, body: Node, atLeastOne: bool) =
     ## per iteration. When the body is nullable the guarded form compares the
     ## position against the entry's before reusing it, and leaves the loop if
     ## the iteration consumed nothing.
+    ##
+    ## A loop over a bare charset skips all of that. Span consumes the run in
+    ## one instruction, which is sound because repetition here is possessive:
+    ## the loop form leaves exactly one backtrack entry, pointing past the
+    ## loop, so a later failure never re-enters it with fewer iterations. The
+    ## body captures nothing and always consumes, so there is no capture log
+    ## to roll back and no progress guard to run.
+    let span = spanBody(body)
+    if span != nil:
+        let ix = c.p.poolSet(span.cs)
+        if atLeastOne:
+            discard c.p.add(opSet, ix)
+        discard c.p.add(opSpan, ix)
+        return
     if atLeastOne:
         c.emit(body)
     let nullableBody = isNullable(body, c.nmap)
