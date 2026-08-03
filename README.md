@@ -106,9 +106,7 @@ scripts/differential-corpus.sh ../arturo
 ```
 
 Over Arturo's own source both engines find the same 287 definitions in the
-same 168 files, with the same captures and no disagreement. The interpreted
-matcher takes 16.6 seconds of scanning and the compiled core 28
-milliseconds.
+same 168 files, with the same captures and no disagreement.
 
 Reaching that speed from Arturo needs a builtin, which would mean changing
 Arturo, so this package does not. `nim/adapter/fast.art` goes through the
@@ -118,7 +116,7 @@ FFI instead, which is worth having and still not the engine:
 | --- | ---: | --- |
 | `scan` | 15.6 s | pure Arturo, the reference |
 | `scanFast` | 1.65 s | the shared library, no change to Arturo |
-| the core on values it already holds | 0.028 s | what direct access would expose |
+| the core on values it already holds | 0.03 s | what direct access would expose |
 
 Almost all of the middle row is serialisation: 1.5 seconds to render the
 input against 0.08 to cross the boundary and match, after three rounds of
@@ -166,8 +164,8 @@ misread, so a single process cannot check more than one of them.
 ## Examples
 
 [`examples/`](examples/README.md) holds the proposal's three demos, each
-runnable on its own: JSON in fifteen rules (`json.art`), RFC 4180 CSV in a
-dozen (`csv.art`), and Arturo scanning its own source, one rule extracting
+runnable on its own: JSON in thirteen rules (`json.art`), RFC 4180 CSV in
+nine (`csv.art`), and Arturo scanning its own source, one rule extracting
 every function definition from `carpintero.art` itself (`arturo-scan.art`).
 
 `arturo-corpus.art` takes that last one all the way. Point it at a checkout

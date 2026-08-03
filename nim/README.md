@@ -44,10 +44,10 @@ file in an Arturo checkout, once in each engine:
 
 ```
 exported 168 cases from 168 files (5 would not lex)
+interpreted matcher: 15616 ms scanning, 287 definitions
 differential: 168 cases compared, 0 disagreements
   collected: 287 interpreted, 287 compiled
-  interpreted matcher:  16593 ms scanning
-  compiled engine:         28 ms scanning
+  compiled engine: 0 ms compiling, 31 ms scanning
 ```
 
 The same five-line block grammar finds the same 287 definitions at every
@@ -149,7 +149,7 @@ the fast path from being an assumption.
 
 What did not move is the part that matters. The call, JSON parsing and
 matching included, costs 80 milliseconds, and the compiled core scans the
-same corpus in 28 when handed values it already holds. Serialisation is
+same corpus in about 30 when handed values it already holds. Serialisation is
 still 95% of the bridge.
 
 What changed is what that 95% is made of. It is no longer escaping or a
@@ -170,7 +170,7 @@ same grammar, same corpus, same 287 definitions:
 | --- | ---: | --- |
 | `scan` | 15.6 s | pure Arturo, the reference |
 | `scanFast` | 1.65 s | the shared library, no change to Arturo |
-| the core on values it already holds | 0.028 s | what direct access would expose |
+| the core on values it already holds | 0.03 s | what direct access would expose |
 
 A builtin would take the `Value` block it was handed and match on it in
 place, with no serialisation at either end, which is the third row. Adding

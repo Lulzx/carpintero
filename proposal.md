@@ -341,7 +341,7 @@ and no dependencies, so trying it is `import` on a clone, and it carries an
 they turn out wrong, throwing it away costs a week rather than a subsystem.
 
 This is no longer hypothetical: a draft ships alongside this proposal.
-`carpintero.art` (about 800 lines) implements the Phase 0 through Phase 2
+`carpintero.art` (about 1,340 lines) implements the Phase 0 through Phase 2
 scope against Arturo 0.10.0, plus the interpreted half of Phase 3
 (`cut`, `defer`, opt-in memoization), and `demo.art` passes seventy-one checks
 covering the date example above, capture rollback across failed
@@ -402,12 +402,13 @@ There is even a formal criterion for the compiler's best optimization: the
 grammars a compiler can lower to DFA-like code with no backtracking at all,
 which generalizes the charset-run and head-fail tricks LPeg applies ad hoc.
 
-That core now exists, in `nim/`: about 1,800 lines, no dependencies,
-matching text and blocks, and held to the interpreted semantics by running
-the same grammar over the same input in both engines rather than by sharing
-code. Over Arturo's own source the two agree on every one of 168 files and
-find the same 287 definitions, the interpreted matcher taking 16.6 seconds
-of scanning and the compiled core 28 milliseconds.
+That core now exists, in `nim/`: about 1,570 lines of matcher with no
+dependencies, plus 290 more for the JSON bridge that a builtin would not
+need. It matches text and blocks, and is held to the interpreted semantics
+by running the same grammar over the same input in both engines rather than
+by sharing code. Over Arturo's own source the two agree on every one of 168
+files and find the same 287 definitions, the interpreted matcher taking 15.6
+seconds of scanning and the compiled core about 30 milliseconds.
 
 **It has to be a builtin, and that is a measured claim rather than a
 preference.** The package changes nothing in Arturo, so the only way to
@@ -421,7 +422,7 @@ engine.
 | --- | ---: | --- |
 | `scan` | 15.6 s | pure Arturo, the reference |
 | `scanFast` | 1.65 s | the shared library, no change to Arturo |
-| the core on values it already holds | 0.028 s | what direct access would expose |
+| the core on values it already holds | 0.03 s | what direct access would expose |
 
 Three rounds of optimisation took the serialisation from 15.3 seconds to
 1.5, which is enough to answer the obvious objection that the bridge was
@@ -559,7 +560,7 @@ dialect must agree with the language about what position N means.
   the interpreted semantics by a differential harness rather than by shared
   code. Over Arturo's own source both engines find the same 287 definitions
   in the same 168 files with no disagreement, the interpreted matcher taking
-  16.6 seconds of scanning and the compiled core 28 milliseconds.
+  15.6 seconds of scanning and the compiled core about 30 milliseconds.
   What remains splits in two. Integration is required and is upstream's:
   `Value` in place of the JSON adapter, escapes calling back into the
   interpreter, and registering the module. Memoization and the charset-run
@@ -571,7 +572,7 @@ dialect must agree with the language about what position N means.
 All three now exist as runnable scripts in `examples/`, against the draft
 implementation.
 
-1. **JSON in about thirty lines of rules.** Instantly legible, and everyone
+1. **JSON in eleven lines of rules.** Instantly legible, and everyone
    already knows the grammar, so the reader is comparing presentations rather
    than learning a format.
 2. **A format the core currently hand-parses in Nim.** `helpers/` contains

@@ -9,8 +9,8 @@ arturo examples/json.art
 
 | File | What it is | Why read it |
 | --- | --- | --- |
-| `json.art` | JSON in fifteen rules | The proposal's headline claim, and the shortest complete grammar here. Ends by showing what `scanError` says about `{"a": 01}`. |
-| `csv.art` | RFC 4180 CSV in a dozen | Quoting rules, doubled quotes inside quoted fields, and why `to`/`thru` are not always the answer. |
+| `json.art` | JSON in thirteen rules | The proposal's headline claim, and the shortest complete grammar here. Ends by showing what `scanError` says about `{"a": 01}`. |
+| `csv.art` | RFC 4180 CSV in nine rules | Quoting rules, doubled quotes inside quoted fields, and why `to`/`thru` are not always the answer. |
 | `arturo-scan.art` | Arturo reading one file of its own source | Every top-level function definition in `carpintero.art`, name and parameter list, extracted without running any of it. |
 | `arturo-corpus.art` | Arturo reading *all* of its own source | Takes the path to an Arturo checkout. The differential test that validates `stripComments` against a megabyte of real source, plus a recursive `into` walk that finds every definition at any nesting depth. See below. |
 | `safeload.art` | `loadSafe` on a file that breaks the lexer | Runs `bugs/comment-lexer-hang.art`, a file that hangs `arturo` outright, by stripping its comments with a Carpintero grammar before the lexer sees them. |

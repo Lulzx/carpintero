@@ -4,7 +4,7 @@ The complete reference for the dialect. If you are here to *learn* it,
 [TUTORIAL.md](TUTORIAL.md) is the guided path and this is what you reach
 for afterwards. The design rationale lives in
 [proposal.md](proposal.md). Everything here is exercised by `demo.art`
-(71 checks, the readable tour) and `tests.art` (354 checks, the
+(71 checks, the readable tour) and `tests.art` (359 checks, the
 regression suite) against Arturo 0.10.0.
 
 ```red
@@ -381,8 +381,8 @@ to about 1.5 ms with memoization. Real grammars are effectively linear.
 ## Performance expectations
 
 An interpreted matcher loses to the native regex engine by roughly
-**four orders of magnitude** (`examples/bench.art`: about 22 ms vs
-0.004 ms validating 200 dates). What the dialect offers instead is
+**four orders of magnitude** (`examples/bench.art`: about 21 ms vs
+0.002 ms validating 200 dates). What the dialect offers instead is
 composability and rules that are data, plus a Phase 3 compiled core
 that narrows the gap without closing it. PEG without memoization is
 exponential in pathological grammars (see above) and effectively
@@ -597,7 +597,7 @@ The absences are scope decisions, argued in the proposal, not gaps.
 
 ```
 arturo demo.art     # the readable tour, 71 checks
-arturo tests.art    # the regression suite, 354 checks
+arturo tests.art    # the regression suite, 359 checks
 arturo tests.art trace
 ```
 
