@@ -1,0 +1,17 @@
+;; arturo-scan.art — the proposal demo that matters most: Arturo
+;; pattern-matching its own source. One rule extracts every top-level
+;; function definition from carpintero.art itself, name and parameter
+;; list, without running any of it.
+
+import ./"../carpintero.art"!
+
+funcdef: [:label 'function :block :block]
+
+src: to :block read ./"../carpintero.art"
+
+r: scan src [collect 'defs [any [keep funcdef | skip]]]
+
+print ["top-level function definitions in carpintero.art:" size r\defs]
+loop r\defs 'd [
+    print ["   " first d "  " d\2]
+]

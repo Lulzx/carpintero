@@ -1,0 +1,32 @@
+;; csv.art — the proposal demo: the format the core hand-parses in
+;; helpers slash csv.nim, as a dozen lines of rules. RFC 4180 shape:
+;; quoted fields, doubled-quote escapes, bare fields, CRLF or LF.
+
+import ./"../carpintero.art"!
+
+nl: to :char 10
+cr: to :char 13
+dq: to :char 34
+
+newline: [opt cr nl]
+escq:    [dq dq]
+quoted:  [dq any [escq | not dq skip] dq]
+bare:    [any [not ["," | dq | newline] skip]]
+field:   [quoted | bare]
+record:  [field any ["," field]]
+csv:     [record any [newline record] opt newline]
+
+doc: join.with: to :string nl [
+    {name,role,notes}
+    {ada,architect,"loves ""blocks"", dislikes commas"}
+    {grace,admiral,}
+]
+
+print ["accepts: " scan? doc csv]
+print ["rejects a lone quote: " scan? {a,"b} csv]
+
+;; and extraction, not just validation: pull the fields of one line
+row: scan {ada,architect,"loves ""blocks"""} [
+    collect 'fields [keep field any ["," keep field]]
+]
+print ["fields: " row\fields]

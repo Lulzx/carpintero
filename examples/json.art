@@ -1,0 +1,36 @@
+;; json.art — the proposal demo: JSON in about fifteen rules.
+;; Full grammar: strings with escapes, numbers with exponents,
+;; nested containers, whitespace everywhere the spec allows it.
+
+import ./"../carpintero.art"!
+
+tab: to :char 9
+nl:  to :char 10
+cr:  to :char 13
+dq:  to :char 34
+bs:  to :char 92
+
+digit:   charset "0-9"
+digit19: charset "1-9"
+
+ws:      [any [" " | tab | nl | cr]]
+esc:     [bs skip]
+jstring: [dq any [esc | not dq skip] dq]
+expon:   [["e" | "E"] opt ["+" | "-"] some digit]
+jnumber: [opt "-" ["0" | digit19 any digit] opt ["." some digit] opt expon]
+jvalue:  [ws [jstring | jnumber | jobject | jarray | "true" | "false" | "null"] ws]
+jarray:  ["[" ws opt [jvalue any ["," jvalue]] "]"]
+jpair:   [ws jstring ws ":" jvalue]
+jobject: ["{" ws opt [jpair any ["," jpair]] "}"]
+
+doc: {
+    {"name": "carpintero", "version": 0.1,
+     "keywords": ["peg", "parse", "dialect"],
+     "nested": {"deep": [1, 2.5e-3, true, null]},
+     "escaped": "a \"quoted\" word"}
+}
+
+print ["accepts a real document: " scan? doc jvalue]
+print ["rejects a truncated one: " scan? "[1, [2, 3], 4" jvalue]
+bad: scan {{"a": 01}} jvalue
+print ["and says why: " scanError]

@@ -488,6 +488,9 @@ dialect must agree with the language about what position N means.
 
 ## Demos, in order of how well they land
 
+All three now exist as runnable scripts in `examples/`, against the draft
+implementation.
+
 1. **JSON in about thirty lines of rules.** Instantly legible, and everyone
    already knows the grammar, so the reader is comparing presentations rather
    than learning a format.

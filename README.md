@@ -76,6 +76,12 @@ verified against Arturo 0.10.0. `demo.art` is the test suite (51 checks):
 arturo demo.art
 ```
 
+`examples/` holds the proposal's three demos, each runnable on its own:
+JSON in fifteen rules (`json.art`), RFC 4180 CSV in a dozen
+(`csv.art`), and Arturo scanning its own source — one rule extracting
+every function definition from `carpintero.art` itself
+(`arturo-scan.art`).
+
 `bugs/` contains minimal repros for three Arturo 0.10.0 interpreter bugs
 found while building this, with workarounds documented in `carpintero.art`.
 
