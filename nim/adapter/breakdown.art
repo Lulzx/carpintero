@@ -1,4 +1,6 @@
 ;; breakdown.art — where the FFI path actually spends its time.
+;;
+;;     arturo nim/adapter/breakdown.art ../arturo
 import ./"fast.art"!
 
 defn:  [capture 'name :label ['function | 'method | quote $] opt :attribute capture 'params :block]
@@ -20,36 +22,37 @@ while [i < n][
 print ~"corpus: |size blocks| files"
 
 T: #[n: 0]
-tTree: benchmark.get [
+tEmit: benchmark.get [
     j: 0
     m: size blocks
     while [j < m][
-        discard map blocks\[j] 'e -> itemTree e
+        discard {["block",[} ++ (join.with: "," map blocks\[j] 'e -> emitItem e) ++ "]]"
         j: j + 1
     ]
 ]
-trees: map blocks 'b -> #[kind: "block" v: map b 'e -> itemTree e]
-
-tJson: benchmark.get [
-    j: 0
-    m: size trees
-    while [j < m][
-        discard jsonString trees\[j]
-        j: j + 1
-    ]
-]
-jsons: map trees 'tr -> jsonString tr
+inputs: map blocks 'b -> {["block",[} ++ (join.with: "," map b 'e -> emitItem e) ++ "]]"
 gj: grammarJson allDefns
 
 tCall: benchmark.get [
     j: 0
-    m: size jsons
+    m: size inputs
     while [j < m][
-        discard call.external: carpinteroLib .expect: :string 'cpScan @[gj jsons\[j]]
+        discard call.external: carpinteroLib .expect: :string 'cpScan @[gj inputs\[j]]
         j: j + 1
     ]
 ]
 
-print ["  itemTree (Value to tagged dicts):" tTree]
-print ["  jsonString (dicts to text):      " tJson]
-print ["  the call, matching included:     " tCall]
+;; the old path, for comparison: tagged dictionaries then a character-by-
+;; character escaper
+tOld: benchmark.get [
+    j: 0
+    m: size blocks
+    while [j < m][
+        discard jsonString #[kind: "block" v: map blocks\[j] 'e -> itemTree e]
+        j: j + 1
+    ]
+]
+
+print ["  emitItem (values straight to text):" tEmit]
+print ["  the call, matching included:       " tCall]
+print ["  for comparison, itemTree+jsonString:" tOld]

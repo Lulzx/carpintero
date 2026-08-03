@@ -29,27 +29,55 @@ import ./"export.art"!
 JQ: to :char 34
 JB: to :char 92
 
-jsonEscape: function [s][
-    out: ""
+SJQ: to :string JQ
+SJB: to :string JB
+SNL: to :string to :char 10
+STB: to :string to :char 9
+SCR: to :string to :char 13
+
+;; Escaping runs as native replace passes rather than a character loop.
+;; Arturo indexes a string by walking it, and a loop that touches every
+;; character costs about 2.5 microseconds each, which over a corpus is
+;; most of the time the whole bridge spends. `replace` scans in native
+;; code and is flat in the length of the string: at 1600 characters the
+;; loop took 1011 ms per 200 calls and this takes 1.7.
+;;
+;; The five passes cover what JSON requires plus the three control
+;; characters that occur in practice. A string carrying any other control
+;; character takes the slow path, which is exact.
+CTRL: {/[\x00-\x08\x0b\x0c\x0e-\x1f]/}
+
+jsonEscapeSlow: function [s][
+    out: []
     i: 0
     n: size s
     while [i < n][
         c: s\[i]
         cp: to :integer c
         done: false
-        if c = JQ [ out: out ++ JB ++ JQ  done: true ]
-        if and? [not? done] [c = JB]  [ out: out ++ JB ++ JB  done: true ]
-        if and? [not? done] [cp = 10] [ out: out ++ JB ++ "n"  done: true ]
-        if and? [not? done] [cp = 9]  [ out: out ++ JB ++ "t"  done: true ]
-        if and? [not? done] [cp = 13] [ out: out ++ JB ++ "r"  done: true ]
+        if c = JQ [ out: append out @[SJB ++ SJQ]  done: true ]
+        if and? [not? done] [c = JB]  [ out: append out @[SJB ++ SJB]  done: true ]
+        if and? [not? done] [cp = 10] [ out: append out @[SJB ++ "n"]  done: true ]
+        if and? [not? done] [cp = 9]  [ out: append out @[SJB ++ "t"]  done: true ]
+        if and? [not? done] [cp = 13] [ out: append out @[SJB ++ "r"]  done: true ]
         if and? [not? done] [cp < 32] [
-            out: out ++ JB ++ "u00" ++ pad.left.with:`0` (to :string .format:"x" cp) 2
+            out: append out @[SJB ++ "u00" ++ pad.left.with:`0` (to :string .format:"x" cp) 2]
             done: true
         ]
-        unless done [ out: out ++ to :string c ]
+        unless done [ out: append out @[to :string c] ]
         i: i + 1
     ]
-    out
+    join out
+]
+
+jsonEscape: function [s][
+    if match? s CTRL -> return jsonEscapeSlow s
+    ; backslash first, or it doubles what the later passes introduce
+    r: replace s SJB SJB ++ SJB
+    r: replace r SJQ SJB ++ SJQ
+    r: replace r SNL SJB ++ "n"
+    r: replace r STB SJB ++ "t"
+    replace r SCR SJB ++ "r"
 ]
 
 jsonString: function [v][
@@ -75,6 +103,68 @@ jsonString: function [v][
     if t = "logical"  -> return (v)? -> "true" -> "false"
     if t = "null"     -> return "null"
     JQ ++ (jsonEscape to :string v) ++ JQ
+]
+
+;; ── values, straight to text ─────────────────────────────────────────
+;; The input is the bulk of what crosses, so it does not go through the
+;; tagged dictionaries `itemTree` builds. Walking the Arturo value once and
+;; emitting text directly skips building a tree only to walk it again, and a
+;; two-element array costs fewer characters and fewer joins than an object
+;; with named fields. Over Arturo's own source the pair is worth about five
+;; times: 9.5 seconds for `itemTree` plus `jsonString`, 2.0 for this.
+;;
+;; Types are compared as type values rather than stringified per node, since
+;; `to :string type v` is a conversion for every element in the corpus.
+
+TBLOCK: to :type "block"
+TSTR:   to :type "string"
+TWORD:  to :type "word"
+TLABEL: to :type "label"
+TLIT:   to :type "literal"
+TSYM:   to :type "symbol"
+TSYML:  to :type "symbolliteral"
+TTYPE:  to :type "type"
+TINT:   to :type "integer"
+TFLOAT: to :type "floating"
+TLOG:   to :type "logical"
+TCHAR:  to :type "char"
+TNULL:  to :type "null"
+TDICT:  to :type "dictionary"
+
+qs: function [x][ SJQ ++ (jsonEscape x) ++ SJQ ]
+
+emitItem: function [v][
+    t: type v
+    if t = TWORD  -> return {["w",} ++ (qs to :string v) ++ "]"
+    if t = TSTR   -> return {["s",} ++ (qs v) ++ "]"
+    if t = TBLOCK -> return {["b",[} ++ (join.with: "," map v 'e -> emitItem e) ++ "]]"
+    if t = TSYM   -> return {["y",} ++ (qs to :string v) ++ "]"
+    if t = TLABEL -> return {["l",} ++ (qs to :string v) ++ "]"
+    if t = TINT   -> return {["i",} ++ (to :string v) ++ "]"
+    if t = TLIT   -> return {["t",} ++ (qs to :string v) ++ "]"
+    if t = TTYPE  -> return {["T",} ++ (qs ":" ++ to :string v) ++ "]"
+    if t = TCHAR  -> return {["c",} ++ (to :string to :integer v) ++ "]"
+    if t = TSYML  -> return {["q",} ++ (qs to :string v) ++ "]"
+    if t = TFLOAT -> return {["f",} ++ (to :string v) ++ "]"
+    if t = TLOG   -> return {["g",} ++ ((v)? -> "true" -> "false") ++ "]"
+    if t = TNULL  -> return {["n",""]}
+    if t = TDICT [
+        ks: keys v
+        parts: []
+        i: 0
+        n: size ks
+        while [i < n][
+            k: ks\[i]
+            parts: append parts @["[" ++ (qs k) ++ "," ++ (emitItem v\[k]) ++ "]"]
+            i: i + 1
+        ]
+        return {["d",[} ++ (join.with: "," parts) ++ "]]"
+    ]
+    ; everything else crosses as an opaque leaf: a tag and whatever
+    ; rendering the type has, which some of them do not
+    r: ""
+    e: try [ r: to :string v ]
+    {["o",} ++ (qs to :string t) ++ "," ++ (qs r) ++ "]"
 ]
 
 ;; ── the library ──────────────────────────────────────────────────────
@@ -125,12 +215,12 @@ spanValue: function [input isblk span][
 ;; scanFast: the contract scan has, a dictionary of captures or null.
 scanFast: function [input rule][
     isblk: block? input
-    inp: (isblk)? -> #[kind: "block" v: map input 'e -> itemTree e]
-                  -> #[kind: "text" v: input]
+    inp: (isblk)? -> {["block",[} ++ (join.with: "," map input 'e -> emitItem e) ++ "]]"
+                  -> {["text",} ++ (SJQ ++ (jsonEscape input) ++ SJQ) ++ "]"
 
     reply: call.external: carpinteroLib
                 .expect: :string
-                'cpScan @[grammarJson rule  jsonString inp]
+                'cpScan @[grammarJson rule  inp]
 
     r: read.json.string reply
     if key? r 'error [ panic ~"carpintero (compiled): |r\error|" ]

@@ -121,10 +121,11 @@ matcher takes 16.6 seconds of scanning and the compiled core 28
 milliseconds.
 
 Reaching that speed from Arturo needs a builtin, which would mean changing
-Arturo, so this package does not. Going through the FFI instead costs more
-in serialisation than the whole match: 13.8 seconds to build the JSON
-against 0.13 seconds to cross the boundary and match. The measurement, and
-what it argues, is in [nim/README.md](nim/README.md).
+Arturo, so this package does not. Going through the FFI instead spends
+almost everything on serialisation: 2.3 seconds to render the input against
+0.09 to cross the boundary and match, after two rounds of making the
+rendering faster. The measurement, and what it argues, is in
+[nim/README.md](nim/README.md).
 
 ## Running everything
 

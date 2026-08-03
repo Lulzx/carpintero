@@ -54,14 +54,15 @@ proc cpScan(grammarJson: cstring, inputJson: cstring): cstring
             programs[gkey] = compile(loadGrammar(parseJson(gkey)))
         let prog = programs[gkey]
 
+        # ["block",[...]] or ["text","..."], the compact form fast.art emits
         let inp = parseJson($inputJson)
         var r: ScanResult
-        if inp["kind"].getStr == "block":
+        if inp[0].getStr == "block":
             var items: seq[Item] = @[]
-            for e in inp["v"]: items.add(loadItem(e))
+            for e in inp[1]: items.add(loadItem(e))
             r = scan(prog, items)
         else:
-            r = scan(prog, inp["v"].getStr)
+            r = scan(prog, inp[1].getStr)
 
         var reply = newJObject()
         reply["ok"] = newJBool(r.ok)

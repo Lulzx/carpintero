@@ -16,7 +16,48 @@ proc want(n: JsonNode, field: string): JsonNode =
         raise newException(LoadError, "missing field '" & field & "' in " & $n)
     n[field]
 
+const compactKinds = {
+    "b": itBlock, "s": itString, "w": itWord, "l": itLabel, "t": itLiteral,
+    "y": itSymbol, "q": itSymbolLiteral, "T": itType, "i": itInteger,
+    "f": itFloating, "g": itLogical, "c": itChar, "n": itNull,
+    "d": itDictionary, "o": itOpaque}.toTable
+
+proc loadCompact(n: JsonNode): Item =
+    ## The form the FFI path sends: a two-element array, tag first. Building
+    ## it costs the Arturo side about five times less than the object form,
+    ## and the input is the bulk of what crosses.
+    if n.kind != JArray or n.len < 1:
+        raise newException(LoadError, "malformed compact value: " & $n)
+    let tag = n[0].getStr
+    if tag notin compactKinds:
+        raise newException(LoadError, "unknown compact tag '" & tag & "'")
+    case compactKinds[tag]
+    of itBlock:
+        var its: seq[Item] = @[]
+        for e in n[1]: its.add(loadCompact(e))
+        Item(kind: itBlock, items: its)
+    of itDictionary:
+        var ps: seq[(string, Item)] = @[]
+        for pair in n[1]: ps.add((pair[0].getStr, loadCompact(pair[1])))
+        Item(kind: itDictionary, pairs: ps)
+    of itString: iStr(n[1].getStr)
+    of itWord: iWord(n[1].getStr)
+    of itLabel: iLabel(n[1].getStr)
+    of itLiteral: iLit(n[1].getStr)
+    of itSymbol: iSym(n[1].getStr)
+    of itSymbolLiteral: iSymLit(n[1].getStr)
+    of itType: iType(n[1].getStr)
+    of itInteger: iInt(n[1].getBiggestInt)
+    of itFloating: iFloat(n[1].getFloat)
+    of itLogical: iLog(n[1].getBool)
+    of itChar: Item(kind: itChar, c: int32(n[1].getInt))
+    of itNull: iNull()
+    of itOpaque: iOpaque(n[1].getStr, (if n.len > 2: n[2].getStr else: ""))
+
 proc loadItem*(n: JsonNode): Item =
+    ## Both shapes: the object form the differential corpus is written in,
+    ## and the compact array form the FFI path sends.
+    if n.kind == JArray: return loadCompact(n)
     let k = want(n, "k").getStr
     case k
     of "block":

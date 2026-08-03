@@ -114,27 +114,36 @@ models opaquely survive untouched.
 
 ### What that costs, and what it argues
 
-Over the corpus, `scanFast` takes 15.3 seconds against `scan`'s 19.8. The
-compiled core scans the same corpus in 28 milliseconds, so almost none of
-that is matching. `adapter/breakdown.art` says where it goes:
+Over the corpus `scanFast` takes 2.3 seconds against `scan`'s 22.6, so about
+nine and a half times. `adapter/breakdown.art` says where the 2.3 goes:
 
 | Stage | Time |
 | --- | --- |
-| `itemTree`, Arturo values to tagged dictionaries | 1.5 s |
-| `jsonString`, dictionaries to text | 13.8 s |
-| the call itself, JSON parsing and matching included | 0.13 s |
+| `emitItem`, Arturo values straight to text | 2.29 s |
+| the call itself, JSON parsing and matching included | 0.09 s |
 
-Crossing the boundary and matching costs 134 milliseconds. Building the text
-to cross it with costs 13.8 seconds, a hundred times the work it is feeding,
-and all of it in the interpreter the compiled core exists to get away from.
+The first version of this was fifteen times slower, and two changes account
+for it. Escaping ran as an interpreted loop over characters, at about 2.5
+microseconds each; `replace` scans in native code and is flat in the length
+of the string, which at 1600 characters is 1.7 milliseconds against 1011.
+And the input went through the tagged dictionaries `itemTree` builds, only
+to be walked again to make text, so it now goes straight to text in a
+two-element array with the type compared as a type rather than stringified
+per element. Together: 15.3 seconds down to 2.3.
 
-That is the argument for a real builtin rather than a bridge, and it is the
-one thing an FFI experiment can establish that a benchmark cannot: the
-engine is not the problem, and no amount of work on the engine will fix
-this. A builtin would take the `Value` block it was handed and match on it
-in place, with no serialisation at either end, which is the 28 milliseconds.
-Adding one means a `src/library/Parse.nim` and a line in `src/vm/vm.nim`,
-which is a change to Arturo and therefore upstream's call to make.
+What did not move is the part that matters. The call, JSON parsing and
+matching included, costs 89 milliseconds, and the compiled core scans the
+same corpus in 28 when handed values it already holds. Serialisation is
+still 96% of the bridge, and the remaining cost is not a slow escaper or a
+wasteful encoding, it is that the values have to be walked and rendered in
+Arturo at all.
+
+That is the argument for a builtin rather than a bridge, and it is the one
+thing an FFI experiment can establish that a benchmark cannot. A builtin
+would take the `Value` block it was handed and match on it in place, with no
+serialisation at either end, which is the 28 milliseconds. Adding one means
+a `src/library/Parse.nim` and a line in `src/vm/vm.nim`, which is a change
+to Arturo and therefore upstream's call to make.
 
 ## What does not
 
