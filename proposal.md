@@ -389,9 +389,12 @@ front end, which is demo 3's thesis stated as a working program.
 
 **Then propose the matcher core in Nim,** once the vocabulary and the
 backtracking semantics have stopped moving. The target is an LPeg-style
-instruction set with rules compiled once and cached. `helpers/charsets.nim`
-already exists, so charset-as-bitset, the single biggest win for
-character-class matching, is largely there, and NPeg demonstrates the whole
+instruction set with rules compiled once and cached. Core has no bitset
+machinery to borrow for this — `helpers/charsets.nim` is locale alphabet
+tables for `alphabet` and `unisort`, not character classes — but the piece
+needed is small and self-contained: Nim's native `set[char]` covers the
+ASCII half outright, and the non-ASCII half is the sorted range list the
+interpreted version already carries. NPeg demonstrates the whole
 architecture in Nim already. Because the interpreted version uses the same
 capture-log semantics, the compiled core is an engine swap, not a redesign.
 There is even a formal criterion for the compiler's best optimization: the
