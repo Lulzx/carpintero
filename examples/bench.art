@@ -1,0 +1,62 @@
+;; bench.art — the Phase 3 benchmarks, with the honesty the proposal
+;; demands stated first: this is an interpreted matcher and it loses,
+;; badly, to the native regex engine and to any hand-written parser.
+;; The pitch is expressiveness and rules as data, not throughput; the
+;; compiled core proposed for Phase 3 narrows the gap without closing
+;; it. Numbers below are for tracking the gap, not for winning.
+
+import ./"../carpintero.art"!
+
+digit: charset "0-9"
+date: [4 digit "-" 2 digit "-" 2 digit]
+
+n: 200
+doc: join.with: "," map 1..n 'i -> "2026-08-03"
+
+print "-- date validation, 200 dates ---------------------------------"
+t1: benchmark.get [ ok1: scan? doc [date any ["," date]] ]
+print ["   scan, grammar rules:      " t1 "  result:" ok1]
+t2: benchmark.get [ ok2: match? doc {/^\d{4}-\d{2}-\d{2}(,\d{4}-\d{2}-\d{2})*$/} ]
+print ["   match, native regex:      " t2 "  result:" ok2]
+
+print ""
+print "-- json validation ---------------------------------------------"
+ws: [any " "]
+jstring: [{"} to {"} skip]
+jnumber: [opt "-" some digit opt ["." some digit]]
+jvalue: [jstring | jnumber | jobject | jarray | "true" | "false" | "null"]
+jarray: ["[" ws opt [jvalue ws any ["," ws jvalue ws]] "]"]
+jpair: [jstring ws ":" ws jvalue]
+jobject: ["{" ws opt [jpair ws any ["," ws jpair ws]] "}"]
+
+jdoc: join.with: ", " map 1..40 'i -> {{"k": [1, 2.5, "x", {"n": null}]}}
+jdoc: join @["[" jdoc "]"]
+t3: benchmark.get [ ok3: scan? jdoc jvalue ]
+print ["   scan," size jdoc "chars:       " t3 "  result:" ok3]
+
+print ""
+print "-- pathological backtracking, with and without memo ------------"
+;; the textbook exponential shape: every level re-evaluates the level
+;; below twice at the same position when its first arm fails, so the
+;; tower costs two to the twelfth rule invocations — this is what the
+;; manual means by pathological. Memoization collapses it to linear.
+e0: ["a"]
+e1: [e0 "x" | e0 "y"]
+e2: [e1 "x" | e1 "y"]
+e3: [e2 "x" | e2 "y"]
+e4: [e3 "x" | e3 "y"]
+e5: [e4 "x" | e4 "y"]
+e6: [e5 "x" | e5 "y"]
+e7: [e6 "x" | e6 "y"]
+e8: [e7 "x" | e7 "y"]
+e9: [e8 "x" | e8 "y"]
+e10: [e9 "x" | e9 "y"]
+e11: [e10 "x" | e10 "y"]
+e12: [e11 "x" | e11 "y"]
+pdoc: join @["a" repeat "y" 12]
+allrules: ['e0 'e1 'e2 'e3 'e4 'e5 'e6 'e7 'e8 'e9 'e10 'e11 'e12]
+
+t4: benchmark.get [ ok4: scan? pdoc e12 ]
+print ["   tower of 12, no memo:    " t4 "  result:" ok4]
+t5: benchmark.get [ ok5: not? null? scan.memo: allrules pdoc e12 ]
+print ["   tower of 12, memo:       " t5 "  result:" ok5]

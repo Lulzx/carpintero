@@ -162,6 +162,40 @@ note: function [x][ G\n: G\n + x  x ]
 r8: scan "aab" [some [do [note 1] "a"] "b"]
 check "do runs per attempt" G\n 3
 
+;; Phase 3, cut, deferred escapes, opt-in memoization.
+
+;; cut commits the innermost enclosing choice: after cut, a failure
+;; stops the whole choice instead of trying the next alternative
+check "cut commits a choice" scan? "ab" ["a" cut "x" | "ab"] false
+check "no cut, next arm tried" scan? "ab" ["a" "x" | "ab"] true
+check "cut is local to its block" scan? "ab" [["a" cut "x" | "z"] | "ab"] true
+
+;; defer: a host escape that runs only on overall success, exactly
+;; once, in match order — dead branches take their defers with them.
+;; escape functions end with a value on purpose: a function whose
+;; body ends in an assignment crashes when invoked through do, see
+;; bugs, do-assignment-crash
+G2: #[n: 0]
+bump: function [x][ G2\n: G2\n + x  x ]
+r10: scan "ab" ["a" defer [bump 1] "b"]
+check "defer runs on commit" G2\n 1
+r11: scan "ax" ["a" defer [bump 10] "b"]
+check "defer skipped on failure" G2\n 1
+r12: scan "abab" [["ab" defer [bump 100] "x"] | "abab"]
+check "defer dies with its branch" G2\n 1
+
+;; opt-in memoization: scan.memo names the rules to memoize. A hit
+;; replays the capture log slice, so captures survive, and skips
+;; re-evaluation, so the do escape inside runs once, not twice.
+G3: #[n: 0]
+mrule: [do [bump3 1] capture 'm "ab"]
+bump3: function [x][ G3\n: G3\n + x  x ]
+r13: scan.memo: ['mrule] "abab" [mrule "x" | mrule "ab"]
+check "memo replays captures" r13\m "ab"
+check "memo hit skips re-evaluation" G3\n 1
+r14: scan "abab" [mrule "x" | mrule "ab"]
+check "without memo it runs twice" G3\n 3
+
 ;; farthest-failure error report: the Phase 2 target message — the
 ;; failing terminal reported by its rule name, the enclosing capture
 ;; as context, and the source line with a caret under the column

@@ -246,7 +246,9 @@ reaching it twice; Red at least documents the limited backtracking. Here it
 is a rule, stated where the feature is introduced. If a real need for
 run-exactly-once escapes emerges, UPARSE points at the sound design: a
 deferred escape whose block is queued during matching and evaluated only on
-commit. That is a possible Phase 3 addition, not a Phase 0 promise.
+commit. The draft now implements this as `defer`: the block rides in the
+capture log, rolls back with a dead branch like a capture does, and runs
+exactly once per successful scan, in match order.
 
 ## A divergence from the wishlist
 
@@ -339,8 +341,9 @@ dependencies. If the semantics turn out wrong, throwing it away costs a week
 rather than a subsystem.
 
 This is no longer hypothetical: a draft ships alongside this proposal.
-`carpintero.art` (about 680 lines) implements the Phase 0 through Phase 2
-scope against Arturo 0.10.0, and `demo.art` passes fifty-one checks
+`carpintero.art` (about 800 lines) implements the Phase 0 through Phase 2
+scope against Arturo 0.10.0, plus the interpreted half of Phase 3 —
+`cut`, `defer`, opt-in memoization — and `demo.art` passes sixty-six checks
 covering the date example above, capture rollback across failed
 alternatives, the progress guard on nullable loop bodies, prefix mode,
 `to`/`thru`, charset ranges, a mutually recursive JSON validator in nine
@@ -451,17 +454,25 @@ full memoization multiplies memory by the input size and usually slows
 matching down; that finding is the founding argument of LPeg's VM, and
 CPython's PEG parser settled on memoizing only individually marked rules.
 Carpintero routes every rule invocation through one dispatch point keyed by
-rule and position, so an opt-in per-rule memo attribute can bolt on later if
-a real grammar exhibits super-linear behavior. It is not in any phase's
-promises. Two notes for whoever builds it: a memo entry must store the
+rule and position, and the draft now carries the opt-in version:
+`scan.memo: ['rule ...]` memoizes exactly the named rules for that scan.
+The benchmark shows why both halves of that sentence matter — the
+deliberately exponential tower grammar drops from about a second and a
+half to about five milliseconds when memoized, and ordinary grammars pay
+nothing because nothing is memoized unless asked. A memo entry stores the
 capture-log slice its rule produced, not just the end position, or memoized
-hits silently drop captures (Kuramitsu documents the fix); and if entries are
+hits would silently drop captures (Kuramitsu documents the fix); the two
+honest losses on a hit, documented in the code, are that a `do` escape
+inside the rule does not re-run and the farthest-failure report is not
+re-recorded. If entries are
 keyed so they can be shifted when the input changes, incremental reparsing
 falls out almost free, which is how GPeg gets editor-speed reparses from an
 LPeg-style machine. The cheaper complement to memoization is a `cut`: a rule
 that commits the current choice, discarding backtrack points, which both
 bounds pathological backtracking and marks a safe place to flush the capture
-log. It has a published formal semantics and is a natural Phase 3 word.
+log. It has a published formal semantics, and the draft implements it:
+`cut` commits the innermost enclosing choice block, so after cut a failure
+stops the whole choice instead of trying the next alternative.
 
 **Testing** deserves a plan of its own, because grammars are the worst kind
 of code to test by hand: the interesting inputs are the ones nobody thinks
@@ -492,7 +503,10 @@ dialect must agree with the language about what position N means.
   descriptions, `fail "message"`, `collect`/`keep`, lookahead, host escape.
 - **Phase 3**: the Nim rule compiler, `cut`, opt-in per-rule memoization,
   deferred (commit-time) escapes if demand exists, benchmarks against `match`
-  and against hand-written parsers.
+  and against hand-written parsers. Everything but the compiler now exists
+  in the interpreted draft — `cut`, `defer`, `scan.memo`, and
+  `examples/bench.art` — so what remains of Phase 3 is exactly the upstream
+  conversation: an engine swap under settled semantics.
 
 ## Demos, in order of how well they land
 

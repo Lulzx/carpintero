@@ -1,0 +1,10 @@
+;; second shape of the do-assignment crash: no nesting needed when the
+;; assignment is the last statement of a function the block calls
+G: #[n: 0]
+bad:  function [x][ G\n: G\n + x ]
+good: function [x][ G\n: G\n + x  x ]
+
+r1: do [good 1]
+print "good survives"
+r2: do [bad 1]
+print "never reached"

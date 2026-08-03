@@ -42,6 +42,26 @@ same `do` succeed.
 
 Prints `2`, then `3`, then `never reached`.
 
+## A second shape of the same crash
+
+The nesting is not required if the assignment hides inside a called
+function: `do` of a block that calls a function whose *body ends with an
+assignment* crashes even at top level. Making that function return a value
+after the assignment fixes it.
+
+```arturo
+G: #[n: 0]
+bad:  function [x][ G\n: G\n + x ]
+good: function [x][ G\n: G\n + x  x ]
+
+r1: do [good 1]
+print "good survives"
+r2: do [bad 1]
+print "never reached"
+```
+
+Actual output: `good survives`, then silent exit 1.
+
 ## Environment
 
 - Arturo 0.10.0 "Arizona Bark" (arm64/macos, Homebrew)

@@ -5,7 +5,9 @@
 ;; rejection, block matching with type and literal-word terminals plus
 ;; quote, lookahead with ahead and not, collect and keep, the do host
 ;; escape, fail with a message, and farthest-failure error reporting
-;; through scanError.
+;; through scanError — plus the interpreted half of the Phase 3 scope:
+;; cut, the deferred commit-time escape, and opt-in per-rule
+;; memoization through the memo attribute.
 ;;
 ;; Grammar elements understood by the matcher:
 ;;   string and char literals
@@ -144,7 +146,12 @@ csMatch?: function [cs c][
 ;; proposal.
 
 CS: #[inp: ""  len: 0  log: []  isblk: false  farpath: []  exp: []  coldepth: 0
-      rules: []  dsc: []  ctx: ""  quiet: 0  path: []]
+      rules: []  dsc: []  ctx: ""  quiet: 0  path: []  cuts: []]
+
+;; per-scan memoization state: rules holds the names opted in through
+;; scan.memo, tab the results keyed by rule name, descent path and
+;; position — see No packrat memoization in the proposal
+MC: #[rules: []  tab: #[]]
 
 logMark: function [][size CS\log]
 
@@ -206,7 +213,7 @@ failAt: function [pos what][
 
 ;; ── rule structure ───────────────────────────────────────────────────
 
-KEYWORDS: ["some" "any" "opt" "between" "capture" "to" "thru" "skip" "end" "quote" "ahead" "not" "collect" "keep" "do" "fail" "into"]
+KEYWORDS: ["some" "any" "opt" "between" "capture" "to" "thru" "skip" "end" "quote" "ahead" "not" "collect" "keep" "do" "fail" "into" "cut" "defer"]
 
 ;; number of items the element starting at idx occupies
 elemSpan: function [items idx][
@@ -217,7 +224,7 @@ elemSpan: function [items idx][
     if in? w ["some" "any" "opt" "to" "thru" "ahead" "not" "keep" "into"] -> return 1 + elemSpan items idx + 1
     if w = "between" -> return 3 + elemSpan items idx + 3
     if in? w ["capture" "collect"] -> return 2 + elemSpan items idx + 2
-    if in? w ["quote" "do" "fail"] -> return 2
+    if in? w ["quote" "do" "fail" "defer"] -> return 2
     1
 ]
 
@@ -371,6 +378,25 @@ matchElemRaw: function [items idx pos][
             msg: items\[idx + 1]
             panic ~"carpintero: |msg| at position |pos|"
         ]
+        ; cut: commit the innermost enclosing choice block — once
+        ; matching passes cut, a later failure in this alternative
+        ; stops the whole choice instead of trying the next arm
+        if w = "cut" [
+            unless empty? CS\cuts [
+                CS\cuts\[(size CS\cuts) - 1]: true
+            ]
+            return pos
+        ]
+        ; defer: a host escape queued in the capture log during
+        ; matching and run only on overall success, in match order —
+        ; so it rolls back with a dead branch like a capture does,
+        ; and runs exactly once per successful scan
+        if w = "defer" [
+            op: items\[idx + 1]
+            unless block? op -> panic "carpintero: defer expects a block of host code"
+            CS\log: append CS\log @[@["defer" op 0 0]]
+            return pos
+        ]
         if w = "into" [
             unless CS\isblk -> panic "carpintero: into needs block input"
             desc: "a nested block"
@@ -407,22 +433,58 @@ matchElemRaw: function [items idx pos][
             v: items\[idx + 1]
             return ((CS\inp\[pos]) = v)? -> pos + 1 -> null
         ]
-        ; a named rule. A block rule becomes while-matching context;
-        ; a terminal rule lends its name to the expected report.
+        ; a named rule, the single dispatch point the proposal keeps
+        ; for opt-in memoization
         unless set? w -> panic ~"carpintero: unbound rule word '|w|'"
-        v: var w
-        if block? v [
-            CS\rules: append CS\rules w
-            p: matchElem @[v] 0 pos
-            CS\rules: chop CS\rules
-            return p
-        ]
-        CS\dsc: append CS\dsc w
-        p: matchElem @[v] 0 pos
-        CS\dsc: chop CS\dsc
-        return p
+        if in? w MC\rules -> return matchNamedMemo w pos
+        return matchNamed w pos
     ]
     panic ~"carpintero: unexpected item in rule: |it|"
+]
+
+;; a named rule. A block rule becomes while-matching context; a
+;; terminal rule lends its name to the expected report.
+matchNamed: function [w pos][
+    v: var w
+    if block? v [
+        CS\rules: append CS\rules w
+        p: matchElem @[v] 0 pos
+        CS\rules: chop CS\rules
+        return p
+    ]
+    CS\dsc: append CS\dsc w
+    p: matchElem @[v] 0 pos
+    CS\dsc: chop CS\dsc
+    p
+]
+
+;; memoized invocation: an entry stores the end position and the
+;; capture log slice the rule produced, replayed on a hit — storing
+;; only the position would silently drop captures, the Kuramitsu fix
+;; from the proposal. Failures memoize too, as a null end position.
+;; Two documented losses on a hit: a do escape inside the rule does
+;; not re-run, and the farthest-failure report is not re-recorded.
+matchNamedMemo: function [w pos][
+    pk: join.with: "," CS\path ++ @[pos]
+    mkey: ~"|w|@|pk|"
+    if key? MC\tab mkey [
+        hit: MC\tab\[mkey]
+        if null? hit\0 -> return null
+        unless empty? hit\1 [
+            loop hit\1 'e [ CS\log: append CS\log @[e] ]
+        ]
+        return hit\0
+    ]
+    mark: logMark
+    p: matchNamed w pos
+    stored: []
+    unless null? p [
+        if (size CS\log) > mark [
+            stored: slice CS\log mark (size CS\log) - 1
+        ]
+    ]
+    MC\tab\[mkey]: @[p stored]
+    p
 ]
 
 ;; some / any: greedy repetition with the mandatory progress guard —
@@ -479,6 +541,7 @@ matchBlock: function [blk pos][
     nItems: size blk
     start: 0
     i: 0
+    CS\cuts: append CS\cuts false
     while [i =< nItems][
         isBar: false
         if i < nItems [
@@ -489,12 +552,20 @@ matchBlock: function [blk pos][
         if or? isBar (i = nItems) [
             sz: logMark
             p: matchSeq blk start i pos
-            unless null? p -> return p
+            unless null? p [
+                CS\cuts: chop CS\cuts
+                return p
+            ]
             t: logTrim sz
+            if last CS\cuts [
+                CS\cuts: chop CS\cuts
+                return null
+            ]
             start: i + 1
         ]
         i: i + 1
     ]
+    CS\cuts: chop CS\cuts
     null
 ]
 
@@ -527,7 +598,7 @@ collectRules: function [blk reg][
         if block? it [ s2: collectRules it reg ]
         if word? it [
             w: to :string it
-            if in? w ["quote" "do" "fail"] -> step: 2
+            if in? w ["quote" "do" "fail" "defer"] -> step: 2
             unless in? w KEYWORDS [
                 unless key? reg w [
                     unless set? w -> panic ~"carpintero: unbound rule word '|w|'"
@@ -550,7 +621,7 @@ elemNullable?: function [items idx nmap][
     if integer? it -> return or? (it = 0) (elemNullable? items idx + 1 nmap)
     if word? it [
         w: to :string it
-        if in? w ["any" "opt" "to" "end" "ahead" "not" "do"] -> return true
+        if in? w ["any" "opt" "to" "end" "ahead" "not" "do" "cut" "defer"] -> return true
         if in? w ["some" "thru" "keep"] -> return elemNullable? items idx + 1 nmap
         if w = "into" -> return false
         if w = "between" -> return or? ((items\[idx + 1]) = 0) (elemNullable? items idx + 3 nmap)
@@ -626,7 +697,7 @@ elemHeads: function [items idx nmap][
         if in? w ["capture" "collect"] -> return elemHeads items idx + 2 nmap
         ; into starts its operand at position 0 of a strictly smaller
         ; input, so descent is progress and cannot left-recurse
-        if in? w ["quote" "do" "fail" "skip" "end" "into"] -> return []
+        if in? w ["quote" "do" "fail" "skip" "end" "into" "cut" "defer"] -> return []
         return @[w]
     ]
     []
@@ -715,6 +786,14 @@ checkGrammar: function [rule][
 
 scan: function [input rule][
     pfx: attr 'prefix
+    mset: attr 'memo
+    MC\rules: []
+    unless null? mset [
+        unless empty? mset [
+            loop mset 'x [ MC\rules: append MC\rules to :string x ]
+        ]
+    ]
+    MC\tab: #[]
     ok: checkGrammar rule
     CS\inp: input
     CS\len: size input
@@ -728,6 +807,7 @@ scan: function [input rule][
     CS\ctx: ""
     CS\quiet: 0
     CS\path: []
+    CS\cuts: []
     p: matchBlock rule 0
     if null? p -> return null
     if and? (null? pfx) (p <> CS\len) -> return null
@@ -761,6 +841,10 @@ scan: function [input rule][
                 caps\[last cnames]: citems\[top]
                 cnames: chop cnames
                 citems: chop citems
+            ]
+            ; deferred escapes run here, on commit, in match order
+            if kind = "defer" [
+                res: do e\1
             ]
         ]
     ]
