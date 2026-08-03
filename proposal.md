@@ -181,8 +181,9 @@ Two rules of the road, both learned from Rebol's scars:
 Charset syntax: inside `charset "..."`, a `-` between two characters denotes
 an inclusive range, and a leading, trailing, or escaped `\-` is the literal
 dash. `charset "a-z0-9-"` is lowercase letters, digits, and dash. Charsets
-are values, so `union`, `intersection`, and complement compose them the way
-bitsets compose in Rebol.
+are values, so union, intersection, and complement compose them the way
+bitsets compose in Rebol — as `csUnion`, `csIntersect`, and
+`csComplement`, since core owns the unprefixed words for blocks.
 
 ### Arriving from Red
 
@@ -347,12 +348,16 @@ rules, block matching (the funcdef example above runs as written against a
 block of Arturo code, with `:type` terminals, literal-word matching, and
 `quote`), `into` descent into nested blocks (with captures inside the
 nested block landing correctly, and rolling back with the path that made
-them), lookahead, `collect`/`keep` with rollback, the `do` escape (the
-demo *demonstrates* the re-run contract: an escape inside `some` runs once
-per attempt, including the failed one), and the farthest-failure error
-report: the `date` grammar failing on `"2026-08-0x"` yields "scan failed at
-line 1, column 10 — expected: charset 0-9", which is the Phase 2 target
-message working today. Direct left recursion
+them), charset composition, lookahead, `collect`/`keep` with rollback, the
+`do` escape (the demo *demonstrates* the re-run contract: an escape inside
+`some` runs once per attempt, including the failed one), and the
+farthest-failure error report: the `date` grammar failing on
+`"2026-08-0x"` renders the Phase 2 target message shown below verbatim —
+the failing terminal named by its rule (`digit`, not its charset
+internals), the enclosing capture as while-matching context, and the
+source line with a caret under the column. Failures inside the operand of
+`not` are excluded from the expected set, since there a failure is the
+grammar succeeding. Direct left recursion
 (`expr: [expr "+" digit | digit]`), indirect left recursion through a
 nullable prefix, and unbound rule words are all rejected at scan start with
 messages naming the cycle or the word. Writing it also surfaced three

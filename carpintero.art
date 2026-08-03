@@ -64,6 +64,68 @@ charset: function [spec][
     #[kind: 'charset  spec: spec  ranges: ranges]
 ]
 
+;; charsets are values and compose. The plain words union and
+;; intersection belong to core, for blocks, so these carry a cs prefix.
+
+csUnion: function [a b][
+    #[kind: 'charset  spec: ~"|a\spec|+|b\spec|"  ranges: a\ranges ++ b\ranges]
+]
+
+csIntersect: function [a b][
+    out: []
+    unless empty? a\ranges [
+        loop a\ranges 'ra [
+            unless empty? b\ranges [
+                loop b\ranges 'rb [
+                    lo: (ra\0 > rb\0)? -> ra\0 -> rb\0
+                    hi: (ra\1 < rb\1)? -> ra\1 -> rb\1
+                    if lo =< hi [ out: append out @[@[lo hi]] ]
+                ]
+            ]
+        ]
+    ]
+    #[kind: 'charset  spec: ~"|a\spec|&|b\spec|"  ranges: out]
+]
+
+;; selection sort by low bound, since core sort has no order guarantee
+;; on nested blocks
+csSortRanges: function [ranges][
+    n: size ranges
+    used: []
+    loop 1..n 'k [ used: append used false ]
+    out: []
+    cnt: 0
+    while [cnt < n][
+        bi: n
+        i: 0
+        while [i < n][
+            unless used\[i] [
+                if bi = n -> bi: i
+                if (ranges\[i]\0) < (ranges\[bi]\0) -> bi: i
+            ]
+            i: i + 1
+        ]
+        used\[bi]: true
+        out: append out @[ranges\[bi]]
+        cnt: cnt + 1
+    ]
+    out
+]
+
+csComplement: function [cs][
+    sorted: csSortRanges cs\ranges
+    out: []
+    prev: 0
+    unless empty? sorted [
+        loop sorted 'r [
+            if r\0 > prev [ out: append out @[@[prev r\0 - 1]] ]
+            if (r\1 + 1) > prev -> prev: r\1 + 1
+        ]
+    ]
+    if prev < 1114112 [ out: append out @[@[prev 1114111]] ]
+    #[kind: 'charset  spec: ~"not |cs\spec|"  ranges: out]
+]
+
 csMatch?: function [cs c][
     cp: to :integer c
     hit: false
@@ -81,7 +143,8 @@ csMatch?: function [cs c][
 ;; and rollback is truncation — see Backtracking semantics in the
 ;; proposal.
 
-CS: #[inp: ""  len: 0  log: []  isblk: false  far: 0  exp: []  coldepth: 0]
+CS: #[inp: ""  len: 0  log: []  isblk: false  far: 0  exp: []  coldepth: 0
+      rules: []  dsc: []  ctx: ""  quiet: 0]
 
 logMark: function [][size CS\log]
 
@@ -93,14 +156,26 @@ logTrim: function [sz][
 ]
 
 ;; record a terminal failure for the farthest-failure error report,
-;; then fail — see Error reporting in the proposal
+;; then fail — see Error reporting in the proposal. Three refinements
+;; over the bare high-water mark:
+;;   dsc, a stack of terminal-rule names, so a charset failing inside
+;;     the rule digit reports the word digit and not its internals
+;;   rules, a stack of enclosing block rules and capture names, whose
+;;     top becomes the while-matching context of the report
+;;   quiet, a counter that suppresses recording inside the operand of
+;;     not, whose failures are the grammar succeeding
 failAt: function [pos what][
+    if CS\quiet > 0 -> return null
+    shown: (empty? CS\dsc)? -> what -> last CS\dsc
     if pos > CS\far [
         CS\far: pos
         CS\exp: []
     ]
     if pos = CS\far [
-        unless in? what CS\exp [ CS\exp: append CS\exp what ]
+        if empty? CS\exp [
+            CS\ctx: (empty? CS\rules)? -> "" -> last CS\rules
+        ]
+        unless in? shown CS\exp [ CS\exp: append CS\exp shown ]
     ]
     null
 ]
@@ -225,7 +300,9 @@ matchElemRaw: function [items idx pos][
             unless literal? nm [
                 panic "carpintero: capture expects a literal name, as in: capture 'year rule"
             ]
+            CS\rules: append CS\rules to :string nm
             p: matchElem items idx + 2 pos
+            CS\rules: chop CS\rules
             if null? p -> return null
             CS\log: append CS\log @[@["cap" to :string nm  pos  p  CS\inp]]
             return p
@@ -235,7 +312,9 @@ matchElemRaw: function [items idx pos][
             return (null? p)? -> null -> pos
         ]
         if w = "not" [
+            CS\quiet: CS\quiet + 1
             p: matchElem items idx + 1 pos
+            CS\quiet: CS\quiet - 1
             return (null? p)? -> pos -> null
         ]
         if w = "collect" [
@@ -282,6 +361,7 @@ matchElemRaw: function [items idx pos][
             oLen: CS\len
             oFar: CS\far
             oExp: CS\exp
+            oCtx: CS\ctx
             CS\inp: el
             CS\len: size el
             CS\far: 0
@@ -291,6 +371,7 @@ matchElemRaw: function [items idx pos][
             CS\len: oLen
             CS\far: oFar
             CS\exp: oExp
+            CS\ctx: oCtx
             if null? inner -> return failAt pos desc
             unless inner = size el -> return failAt pos desc
             return pos + 1
@@ -301,9 +382,20 @@ matchElemRaw: function [items idx pos][
             v: items\[idx + 1]
             return ((CS\inp\[pos]) = v)? -> pos + 1 -> null
         ]
-        ; a named rule
+        ; a named rule. A block rule becomes while-matching context;
+        ; a terminal rule lends its name to the expected report.
         unless set? w -> panic ~"carpintero: unbound rule word '|w|'"
-        return matchElem @[var w] 0 pos
+        v: var w
+        if block? v [
+            CS\rules: append CS\rules w
+            p: matchElem @[v] 0 pos
+            CS\rules: chop CS\rules
+            return p
+        ]
+        CS\dsc: append CS\dsc w
+        p: matchElem @[v] 0 pos
+        CS\dsc: chop CS\dsc
+        return p
     ]
     panic ~"carpintero: unexpected item in rule: |it|"
 ]
@@ -598,6 +690,10 @@ scan: function [input rule][
     CS\far: 0
     CS\exp: []
     CS\coldepth: 0
+    CS\rules: []
+    CS\dsc: []
+    CS\ctx: ""
+    CS\quiet: 0
     p: matchBlock rule 0
     if null? p -> return null
     if and? (null? pfx) (p <> CS\len) -> return null
@@ -642,8 +738,9 @@ scan: function [input rule][
 scanError: function [][
     f: CS\far
     exp: (empty? CS\exp)? -> "end of input" -> join.with: ", " CS\exp
+    ctxs: (CS\ctx = "")? -> "" -> ~"  (while matching: |CS\ctx|)"
     if CS\isblk [
-        return ~"scan failed at index |f| — expected: |exp|"
+        return ~"scan failed at index |f| — expected: |exp||ctxs|"
     ]
     line: 1
     col: 1
@@ -658,7 +755,18 @@ scanError: function [][
         ]
         i: i + 1
     ]
-    ~"scan failed at line |line|, column |col| — expected: |exp|"
+    ; the offending source line, with a caret under the column
+    ls: f
+    while [and? [ls > 0] [(CS\inp\[ls - 1]) <> nl]][ ls: ls - 1 ]
+    le: f
+    while [and? [le < CS\len] [(CS\inp\[le]) <> nl]][ le: le + 1 ]
+    excerpt: (ls = le)? -> "" -> slice CS\inp ls le - 1
+    pad: (col > 1)? -> repeat " " col - 1 -> ""
+    join.with: to :string nl @[
+        ~"scan failed at line |line|, column |col| — expected: |exp||ctxs|"
+        ~"    |excerpt|"
+        ~"    |pad|^"
+    ]
 ]
 
 scan?: function [input rule][

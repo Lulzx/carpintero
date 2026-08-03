@@ -23,9 +23,15 @@ it reached. After a failed scan, `scanError` tells you where and why:
 
 ```
 scan "2026-08-0x" date
-scanError
-; => scan failed at line 1, column 10 — expected: charset 0-9
+print scanError
+; scan failed at line 1, column 10 — expected: digit  (while matching: day)
+;     2026-08-0x
+;              ^
 ```
+
+A terminal that has a rule name is reported by that name, the innermost
+enclosing rule or capture becomes the while-matching context, and the
+offending line is shown with a caret under the column.
 
 Block input uses the language's own type values as terminals:
 
@@ -53,6 +59,9 @@ scan code [any [funcdef | skip]]
 | Escape | `do [...]` host code, `quote value` literal match, `fail "msg"` |
 | Match | strings, chars, charsets, `:type` values, `'word` literals, named rules |
 
+Charsets are values and compose: `csUnion`, `csIntersect`,
+`csComplement` (the unprefixed words belong to core, for blocks).
+
 Semantics worth knowing, all deliberate (the design rationale lives in
 [proposal.md](proposal.md)):
 
@@ -70,7 +79,7 @@ Semantics worth knowing, all deliberate (the design rationale lives in
 ## Status
 
 Draft implementation of the proposal's Phase 0–2 scope, pure Arturo,
-verified against Arturo 0.10.0. `demo.art` is the test suite (51 checks):
+verified against Arturo 0.10.0. `demo.art` is the test suite (56 checks):
 
 ```
 arturo demo.art

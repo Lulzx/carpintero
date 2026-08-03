@@ -68,6 +68,13 @@ ident: charset "a-z0-9-"
 check "charset range" scan? "abc-42" [some ident] true
 check "charset rejects" scan? "ABC" [some ident] false
 
+;; charsets are values and compose
+hexdigit: csUnion digit charset "a-f"
+check "csUnion" scan? "9f" [2 hexdigit] true
+consonant: csIntersect charset "a-z" csComplement charset "aeiou"
+check "csIntersect of csComplement" scan? "bcd" [some consonant] true
+check "complement excludes" scan? "e" [consonant] false
+
 ;; last-wins on repeated capture
 r4: scan "aaab" [some [capture 'c skip]]
 check "last capture wins" r4\c "b"
@@ -151,11 +158,19 @@ note: function [x][ G\n: G\n + x  x ]
 r8: scan "aab" [some [do [note 1] "a"] "b"]
 check "do runs per attempt" G\n 3
 
-;; farthest-failure error report
+;; farthest-failure error report: the Phase 2 target message — the
+;; failing terminal reported by its rule name, the enclosing capture
+;; as context, and the source line with a caret under the column
 r9: scan "2026-08-0x" date
 msg: scanError
 check "error line and column" in? "line 1, column 10" msg true
-check "error names expected" in? "charset 0-9" msg true
+check "error names the rule" in? "expected: digit" msg true
+check "error gives context" in? "while matching: day" msg true
+check "error draws a caret" in? "         ^" msg true
+print ""
+print "the report itself:"
+print msg
+print ""
 
 print ""
 print "-- error demos (each panics; run separately) -----------------"
