@@ -43,6 +43,7 @@ nav:
   - Tutorial: TUTORIAL.md
   - Manual: MANUAL.md
   - Examples: examples/README.md
+  - Compiled core: nim/README.md
   - Proposal: proposal.md
   - Interpreter bugs: bugs/README.md
 
