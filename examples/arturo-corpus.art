@@ -1,0 +1,143 @@
+;; arturo-corpus.art — turn the dialect loose on the language's own
+;; source tree. Point it at an Arturo checkout:
+;;
+;;     git clone --depth 1 https://github.com/arturo-lang/arturo
+;;     arturo examples/arturo-corpus.art ./arturo
+;;
+;; Two grammars, one corpus, two questions.
+;;
+;; The first question is whether stripComments is *safe*. It is a
+;; nine-rule Carpintero grammar that rewrites source text, and the
+;; property it has to hold is that rewriting never changes the program:
+;; for every file, the block the lexer builds from the stripped source
+;; must equal the block it builds from the original. That is a
+;; differential test, and a corpus of a megabyte of real source — with
+;; every apostrophe-in-a-comment, nested curly string and char literal
+;; the language's own test suite can think of — is a far harder
+;; adversary than a handwritten fixture.
+;;
+;; The second is whether a grammar written against the *lexed* form
+;; holds up outside the file it was written for. defn below is five
+;; lines and covers three of the four ways Arturo spells a function
+;; definition; the run reports what it found and what it could not.
+;;
+;; Expect a couple of minutes: the interpreted matcher moves at
+;; roughly 8 KB of source per second, and this is 1 MB of it.
+
+import ./"../carpintero.art"!
+
+;; ── the grammar, over lexed blocks ───────────────────────────────────
+;; Three spellings of a definition — function, method, and the $ sigil —
+;; share one shape: a label, an optional attribute, a parameter block.
+;; $ lexes as a bare symbol, so quote $ is what tells it apart from the
+;; arithmetic that lexes identically (g: + [1 2] is not a definition).
+;;
+;; defn stops at the parameter block on purpose, without consuming the
+;; body. That is what lets the walk below descend into the body on its
+;; next step and find the definitions nested inside it — and Arturo's
+;; source nests them heavily, inside describe blocks, inside other
+;; functions, inside if arms. A rule that swallowed the body would
+;; report roughly half of what is there.
+
+defn: [
+    capture 'name :label
+    ['function | 'method | quote $]
+    opt :attribute
+    capture 'params :block
+]
+
+;; ahead :block classifies without consuming: a definition whose body is
+;; a block, versus one whose body is the expression after ->.
+withBody: [defn ahead :block]
+
+;; The walk is the rule that makes this a block grammar rather than a
+;; text search: at every element, try the pattern, else descend into it
+;; if it is a block, else step over it. into recurses through the whole
+;; tree, at any depth, and a rule may name itself inside into because
+;; the operand starts at position 0 of a strictly smaller input.
+;;
+;; The recursion is the walk rule, not the collect: a collect nested
+;; inside itself would open a fresh collection at every level and the
+;; inner keeps would never reach the outer one. So the collect wraps the
+;; walk once, from outside, and the walk recurses under it.
+allWalk:  [any [keep defn     | into allWalk | skip]]
+blkWalk:  [any [keep withBody | into blkWalk | skip]]
+
+allDefns: [collect 'found allWalk]
+blkDefns: [collect 'found blkWalk]
+
+;; ── the corpus ───────────────────────────────────────────────────────
+
+root: (empty? arg)? -> "." -> first arg
+files: select list.recursive.relative root 'f -> "art" = last split.by:"." f
+
+if empty? files [
+    print ~"no .art files under |root| — pass the path to an Arturo checkout"
+    exit
+]
+
+print ~"carpintero over |size files| .art files under |root|"
+print ""
+
+nbytes:   0
+nOk:      0        ; stripped source lexes to the same block as the raw source
+nBoth:    []       ; neither form lexes — the file is not valid on its own
+nDiffer:  []       ; the two blocks compare unequal
+nDefns:   0
+nArrow:   0
+biggest:  ["" 0]
+
+loop files 'f [
+    path: root ++ "/" ++ f
+    src: read path
+    nbytes: nbytes + size src
+
+    stripped: stripComments src
+
+    ; Both legs are guarded. The raw leg is the one that can genuinely
+    ; blow up — it hands comment bytes to the 0.10.0 lexer, which is the
+    ; whole reason stripComments exists (see bugs/).
+    sb: null
+    rb: null
+    try [ sb: to :block stripped true ]
+    try [ rb: to :block src      true ]
+
+    (null? sb)? [
+        ; A file that does not lex either way is not a stripper failure;
+        ; it is a file that was never valid Arturo on its own — the test
+        ; suite keeps deliberate syntax errors around, for instance.
+        (null? rb)? -> 'nBoth ++ f
+                    -> print ~"STRIPPING BROKE THE LEX: |f|"
+    ][
+        (rb = sb)? -> nOk: nOk + 1
+                   -> 'nDiffer ++ f
+
+        ; The definition grammar runs on the stripped block, which is the
+        ; one guaranteed to exist.
+        a: scan sb allDefns
+        d: scan sb blkDefns
+        nDefns: nDefns + size d\found
+        nArrow: nArrow + ((size a\found) - size d\found)
+
+        if (size a\found) > last biggest -> biggest: @[f, size a\found]
+    ]
+]
+
+print ["files            " size files]
+print ["bytes            " nbytes]
+print ["strip-safe       " nOk "  (stripped source lexes to the same block)"]
+print ["never lexed      " (size nBoth) "  (invalid raw too — not a stripper failure)"]
+loop nBoth 'f -> print ["                  " f]
+print ["compared unequal " (size nDiffer)]
+loop nDiffer 'f -> print ["                  " f]
+print ""
+print ["definitions found" nDefns "block-bodied," nArrow "arrow-bodied"]
+print ["densest file     " (first biggest) "with" (last biggest) "definitions"]
+
+unless empty? nDiffer [
+    print ""
+    print "The unequal files are worth a look before blaming the stripper:"
+    print "on 0.10.0 a :symbolliteral is not equal to itself, so any file"
+    print "holding one compares unequal to a byte-identical copy of"
+    print "itself. See bugs/issue-4-symbolliteral-equality.md."
+]

@@ -493,7 +493,15 @@ matchValue: function.inline [vIt vPos][
         ]
         return failAt vPos DWORD vIt
     ]
-    panic ~"carpintero: unexpected item in rule: |vIt|"
+    ; Nothing matched. vIt is deliberately not interpolated into the
+    ; message: a value that reaches here can be a function, and merely
+    ; naming a word bound to a function calls it, so the report would
+    ; disappear into a not-enough-parameters error raised inside the
+    ; callee. dscw is a string and names the rule this came through,
+    ; which is the useful half anyway. The common cause of this, a
+    ; constructor call inlined into a rule, is caught earlier and more
+    ; precisely by collectRules.
+    panic "carpintero: unexpected item in rule, reached through the rule word '" ++ (to :string CS\dscw) ++ "'"
 ]
 
 matchElem: function [items idx pos][
@@ -904,6 +912,17 @@ collectRules: function [blk reg][
                 unless key? reg w [
                     unless set? w -> panic ~"carpintero: unbound rule word '|w|'"
                     reg\[w]: var w
+                    ; A rule word that resolves to a function is almost
+                    ; always a constructor call inlined into a rule, the
+                    ; one mistake the shape of the dialect invites: rule
+                    ; blocks are never evaluated as code, so the call
+                    ; never happens and the bare word is what the matcher
+                    ; sees. Caught here, in the pre-pass, it names the
+                    ; word; caught later it surfaces from inside the
+                    ; function that got called by accident.
+                    if function? reg\[w] [
+                        panic ~"carpintero: rule word '|w|' resolves to a function, not a rule. Rule blocks are never evaluated as code, so a call cannot be inlined into one: build the value outside the rule, bind it to a name, and use the name in the rule."
+                    ]
                     if block? reg\[w] [
                         discard collectRules reg\[w] reg
                     ]

@@ -73,10 +73,11 @@ strips it, and returns the lexed block — which sidesteps the 0.10.0
 lexer bug where comment contents can hang or corrupt the interpreter
 (`examples/safeload.art` runs a file that hangs `arturo` directly).
 
-The full reference — every word, the error report, memoization, the
-PEG pitfalls and their fixes — is [MANUAL.md](MANUAL.md). Semantics
-worth knowing, all deliberate (the design rationale lives in
-[proposal.md](proposal.md)):
+[TUTORIAL.md](TUTORIAL.md) is the guided path from a first `scan` to
+walking a source tree. The full reference — every word, the error
+report, memoization, the PEG pitfalls and their fixes — is
+[MANUAL.md](MANUAL.md). Semantics worth knowing, all deliberate (the
+design rationale lives in [proposal.md](proposal.md)):
 
 - The whole input must match; use `scan.prefix` for prefix matching.
 - Captures and keeps **roll back** when an alternative fails — a dead parse
@@ -107,7 +108,7 @@ Phase 3 — `cut`, `defer`, opt-in memoization, benchmarks — with only
 the compiled Nim core left to propose upstream.
 
 `demo.art` is the readable tour (71 checks); `tests.art` is the
-regression suite (353 checks, nonzero exit on failure). Grammar errors
+regression suite (354 checks, nonzero exit on failure). Grammar errors
 have to panic to be tested, and a panic unwound through `try` leaves
 the abandoned frames' values behind for the next statements to misread,
 so each of those cases runs in its own interpreter through
@@ -118,19 +119,28 @@ arturo demo.art
 arturo tests.art
 ```
 
-`examples/` holds the proposal's three demos, each runnable on its own:
-JSON in fifteen rules (`json.art`), RFC 4180 CSV in a dozen
-(`csv.art`), and Arturo scanning its own source — one rule extracting
-every function definition from `carpintero.art` itself
-(`arturo-scan.art`). `bench.art` is the Phase 3 benchmark: it shows
+[`examples/`](examples/README.md) holds the proposal's three demos, each
+runnable on its own: JSON in fifteen rules (`json.art`), RFC 4180 CSV in
+a dozen (`csv.art`), and Arturo scanning its own source — one rule
+extracting every function definition from `carpintero.art` itself
+(`arturo-scan.art`). `arturo-corpus.art` takes that last one all the
+way: point it at a checkout of Arturo and it runs both grammars over
+every `.art` file in the language's own tree. On 173 files and a
+megabyte of source, stripping comments never once changed the program
+the lexer builds, and a five-line block grammar found all 287 function
+definitions at every nesting depth — [the write-up is in the
+manual](MANUAL.md#validation-against-arturos-own-source), including the
+fourth interpreter bug it turned up. `bench.art` is the Phase 3
+benchmark: it shows
 scan losing to the native regex engine by the expected orders of
 magnitude, memoization collapsing a deliberately exponential grammar
 from a sixth of a second to a millisecond and a half, and — the figure
 worth watching over time — a cost per kilobyte that stays flat as the
 input doubles.
 
-`bugs/` contains minimal repros for three Arturo 0.10.0 interpreter bugs
-found while building this, with workarounds documented in `carpintero.art`.
+`bugs/` contains minimal repros for four Arturo 0.10.0 interpreter bugs
+— three found while building this, one found by running it over Arturo's
+own test suite — with workarounds documented in `carpintero.art`.
 
 ## Name
 

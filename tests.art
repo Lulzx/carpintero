@@ -508,6 +508,7 @@ discard t "middle recursion is fine" scan? "(()(()))" [some mr] true
 ;; every case that must panic, each in its own interpreter
 discard t "inverted charset range"         panicCase "inverted-range"  true
 discard t "rule word bound to a function"  panicCase "func-word"       true
+discard t "charset inlined into a rule"    panicCase "inline-charset"  true
 discard t "capture needs a literal name"   panicCase "capture-name"    true
 discard t "keep outside collect"           panicCase "keep-outside"    true
 discard t "collect needs a literal name"   panicCase "collect-name"    true

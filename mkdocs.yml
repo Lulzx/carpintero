@@ -40,9 +40,25 @@ theme:
 
 nav:
   - Overview: index.md
+  - Tutorial: TUTORIAL.md
   - Manual: MANUAL.md
+  - Examples: examples/README.md
   - Proposal: proposal.md
   - Interpreter bugs: bugs/README.md
+
+# The markdown lives at the repository root and is staged into docs/, so a
+# cross-document link has to work in two renderers at once. Ask mkdocs to
+# check them, and check the #anchors too — with --strict in CI a broken
+# cross-reference fails the build instead of shipping.
+#
+# Links into source files (carpintero.art, demo.art, the .art examples)
+# have no page in the site and are left at info: they resolve on GitHub,
+# which is where a reader following them wants to end up anyway.
+validation:
+  omitted_files: warn
+  absolute_links: warn
+  unrecognized_links: info
+  anchors: warn
 
 markdown_extensions:
   - abbr

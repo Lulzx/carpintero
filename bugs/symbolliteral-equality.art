@@ -1,0 +1,33 @@
+;; symbolliteral-equality.art — a :symbolliteral is not equal to itself.
+;;
+;; Found by running the Carpintero stripper over Arturo's own test suite
+;; and comparing the lexed source against the lexed stripped source: two
+;; files came back unequal even though every element rendered identically.
+;; The culprit was not the stripper.
+;;
+;; Run: arturo bugs/symbolliteral-equality.art
+;; Expected: every line prints true.
+
+s: first to :block {'+}
+
+print ["type:                " type s]
+print ["renders as:          " to :string s]
+print ""
+print ["s = s                " s = s]                       ; false
+print ["equal? s s           " equal? s s]                  ; false
+print ["contains? @[s] s     " contains? @[s] s]            ; false
+print ["size unique @[s s]   " (size unique @[s s]) = 1]    ; false — dedupe fails
+print ""
+
+;; and so a block holding one is never equal to a copy of itself, which
+;; is how this surfaces in practice
+a: to :block {byteCode ['+]}
+b: to :block {byteCode ['+]}
+print ["identical blocks     " a = b]                       ; false
+
+;; the neighbouring types are fine, which is what makes it a bug and not
+;; a design decision about symbols
+print ""
+print ["symbol   <=          " (first to :block {<=})   = first to :block {<=}]
+print ["literal  'foo        " (first to :block {'foo}) = first to :block {'foo}]
+print ["word     foo         " (first to :block {foo})  = first to :block {foo}]

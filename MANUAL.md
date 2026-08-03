@@ -1,14 +1,52 @@
 # Carpintero manual
 
-The complete reference for the dialect. The design rationale lives in
-[proposal.md](proposal.md). This document is what you need to *use* it.
-Everything here is exercised by `demo.art` (71 checks, the readable
-tour) and `tests.art` (353 checks, the regression suite) against
-Arturo 0.10.0.
+The complete reference for the dialect. If you are here to *learn* it,
+[TUTORIAL.md](TUTORIAL.md) is the guided path and this is what you reach
+for afterwards; the design rationale lives in
+[proposal.md](proposal.md). Everything here is exercised by `demo.art`
+(71 checks, the readable tour) and `tests.art` (354 checks, the
+regression suite) against Arturo 0.10.0.
 
 ```red
 import ./"carpintero.art"!
 ```
+
+## The whole dialect on one screen
+
+```red
+;; entry points
+scan  input rule          ; captures dictionary, or null
+scan? input rule          ; boolean
+scan.prefix input rule    ; [reached: N captures: [...]]
+scan.memo: ['a 'b] i r    ; memoize named rules for this scan
+scanError                 ; report for the most recent failed scan
+
+;; quantify            ;; choose            ;; advance
+some rule               rule | rule          to rule
+any  rule               [ ... ]  (group)     thru rule
+opt  rule                                    skip
+4    rule              ;; look               end
+between 2 5 rule        ahead rule
+                        not rule
+;; capture            ;; descend           ;; escape
+capture 'name rule      into rule            do    [ ... ]
+collect 'name rule                           defer [ ... ]
+keep rule                                    fail  "message"
+                       ;; commit             quote value
+                        cut
+
+;; terminals           string  char  charset  :type  'word  quote v
+;; charsets            charset "a-z0-9"  csUnion  csIntersect  csComplement
+;; utilities           stripComments src     do loadSafe "file.art"
+```
+
+Three things that catch everyone once:
+
+- **The whole input must match.** Use `scan.prefix` otherwise.
+- **`["a" | "ab"]` never matches `"ab"`.** Ordered choice commits to the
+  first arm. Order alternatives longest-first.
+- **Rule blocks are never evaluated as code**, so `[some charset "a-z"]`
+  cannot work. Build charsets outside the rule and name them.
 
 ## Entry points
 
@@ -87,6 +125,12 @@ print scanError
 An empty string `""` matches nothing and consumes nothing (string input
 only).
 
+`quote` compares with `=`, which is exact for every type except one: on
+Arturo 0.10.0 a `:symbolliteral` is not equal to itself, so `[quote '+]`
+can never match a `'+`. The `:symbolliteral` type terminal is unaffected
+— match the type and inspect the capture. See
+[bug 4](bugs/README.md#4-symbolliteral-equalityart-a-symbolliteral-is-not-equal-to-itself).
+
 ### Charsets
 
 ```red
@@ -98,6 +142,22 @@ odd:   charset "a-c\-x"       ; backslash-dash is a literal dash too
 Inside `charset "..."`, `-` between two characters is an inclusive
 codepoint range. A leading, trailing, or backslash-escaped dash is the
 literal character. An inverted range (`"z-a"`) panics.
+
+The `charset` call belongs **outside** the rule, always. Rule blocks are
+never evaluated as code, so `[some charset "a-z"]` does not call
+anything — the block simply holds the word `charset`, which resolves to
+the builtin function, which is not a rule. The grammar pre-pass catches
+this and names the word:
+
+```
+carpintero: rule word 'charset' resolves to a function, not a rule.
+Rule blocks are never evaluated as code, so a call cannot be inlined
+into one: build the value outside the rule, bind it to a name, and use
+the name in the rule.
+```
+
+The same applies to `csUnion` and friends, and to any other call you are
+tempted to inline.
 
 Charsets are values and compose (the unprefixed words belong to core,
 for blocks):
@@ -183,6 +243,35 @@ block and `rule` matches **that block in its entirety**. Captures made
 inside land correctly and roll back normally. A rule may descend into
 itself: the operand starts at position 0 of a strictly smaller input,
 so recursive descent is progress, not left recursion.
+
+#### Walking a whole tree
+
+The idiom for "find every X at any depth" is three alternatives —
+match it, descend into it, or step over it — in a rule that names
+itself:
+
+```red
+defn: [capture 'name :label 'function capture 'params :block]
+walk: [any [keep defn | into walk | skip]]
+
+scan src [collect 'found walk]
+```
+
+Two things about that shape are load-bearing, and getting either wrong
+produces a grammar that works and quietly under-reports:
+
+- The **`collect` wraps the walk from outside** and the recursion lives
+  in `walk`. A `collect` that named itself would open a fresh
+  collection at every level, and the keeps inside would land in the
+  inner one instead of accumulating into the outer.
+- **`defn` stops short of the body block.** It consumes up to the
+  parameter list and no further, which leaves the body for the next
+  step of the walk to descend into — so definitions nested inside
+  function bodies are found too. Use `ahead` if you need to *check* for
+  something without consuming it. A rule that swallowed the body would
+  find only the outermost definition of each nest, which on Arturo's
+  own source is [about half of
+  them](#validation-against-arturos-own-source).
 
 ### Committing
 
@@ -318,6 +407,81 @@ padding, not the file's last value. Evaluate at top level, where
 definitions bind globally. `examples/safeload.art` runs the repro file
 that hangs `arturo` directly.
 
+## Validation against Arturo's own source
+
+`demo.art` and `tests.art` are grammars written against inputs chosen to
+exercise them, which is the weaker half of a testing story. The other
+half is `examples/arturo-corpus.art`: the dialect turned loose on a
+checkout of Arturo itself — 173 `.art` files, 1,074,474 bytes of source
+nobody wrote with this package in mind.
+
+```
+git clone --depth 1 https://github.com/arturo-lang/arturo
+arturo examples/arturo-corpus.art ./arturo
+```
+
+It asks two questions.
+
+### Is `stripComments` safe?
+
+The property that matters for a source rewriter is that rewriting never
+changes the program. That is a differential test: lex each file twice,
+once raw and once stripped, and compare the blocks. Arturo's own test
+suite is a hostile corpus for this by construction — apostrophes inside
+comments, commented-out code, nested curly strings, char literals,
+deliberate syntax errors.
+
+| Result | Files |
+| --- | --- |
+| Stripped source lexes to the same block as the raw source | 166 |
+| Never lexed in either form | 5 |
+| Compared unequal | 2 |
+
+The five that never lexed are four deliberate syntax-error fixtures from
+`tests/errors/` and one script that is not valid Arturo standalone. They
+fail identically with and without stripping, which is the stripper
+behaving correctly rather than failing.
+
+The two that compared unequal are the interesting ones, and the stripper
+was not at fault: on 0.10.0 **a `:symbolliteral` is not equal to
+itself**, so any file containing a `'+` compares unequal to a
+byte-identical copy of itself. That is
+[bug 4](bugs/README.md#4-symbolliteral-equalityart-a-symbolliteral-is-not-equal-to-itself),
+found by using the dialect rather than by writing it. It reaches one
+corner of Carpintero: `[quote '+]` cannot match a `'+` in block input,
+because `quote` compares with `=`. Match `:symbolliteral` and inspect
+the capture instead.
+
+So: zero cases where stripping a comment changed the program.
+
+### Does a block grammar hold up off its home turf?
+
+The second half of the run is the tree walk from
+[above](#walking-a-whole-tree), pointed at every file: find every
+function definition, in all the spellings the language allows —
+`function`, `method`, and the `$` sigil, block-bodied or `->`-bodied.
+`$` lexes as a bare symbol, so `quote $` is what distinguishes a
+definition from the arithmetic that lexes identically (`g: + [1 2]`).
+
+It found **287 definitions, 235 block-bodied and 52 after an arrow**.
+Cross-checked file by file against an independent regex, the two agree
+everywhere except three files — and in all three the grammar is right:
+twice because it does not see commented-out definitions (the regex
+does), once because the regex miscounted.
+
+The first version of that grammar consumed the body block along with the
+head, and found 97. Everything else was nested inside a `describe`
+block, another function, or an `if` arm. That is the argument for `into`
+in one number.
+
+### What it costs
+
+About two and a half minutes for the megabyte, roughly 8 KB of source
+per second, nearly all of it in `stripComments` — which is character-level
+matching over the whole input, the worst case for an interpreted matcher.
+The block-grammar half runs on already-lexed structure and is
+comparatively free. See [Performance expectations](#performance-expectations).
+
 ## Differences from Rebol/Red PARSE
 
 | Rebol/Red | Carpintero | Why |
@@ -339,7 +503,7 @@ The absences are scope decisions, argued in the proposal, not gaps.
 
 ```
 arturo demo.art     # the readable tour, 71 checks
-arturo tests.art    # the regression suite, 353 checks
+arturo tests.art    # the regression suite, 354 checks
 arturo tests.art trace
 ```
 
@@ -357,7 +521,7 @@ outside `collect` — panic by design, and a panic unwound through `try`
 leaves the abandoned matcher frames' values on the stack, where the next
 statements read them as arguments. The symptom is not a failed assertion;
 it is a run that dies several lines later with no message at all. So each
-of the seventeen panic cases runs in its own interpreter through
+of the eighteen panic cases runs in its own interpreter through
 `tests-panics.art`, and counts as passed when that run started and did not
 reach the end. You can run one on its own to see the message:
 

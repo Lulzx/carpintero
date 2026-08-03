@@ -11,7 +11,7 @@
 
 import ./"carpintero.art"!
 
-CASES: ["inverted-range" "func-word" "capture-name" "keep-outside"
+CASES: ["inverted-range" "func-word" "inline-charset" "capture-name" "keep-outside"
         "collect-name" "do-block" "defer-block" "fail" "type-on-string"
         "word-on-string" "quote-on-string" "into-on-string" "unbound"
         "left-direct" "left-indirect" "left-nullable" "between-bounds"]
@@ -36,6 +36,7 @@ lrn: [opt "a" lrn | "z"]
 
 if which = "inverted-range"  [ discard charset "z-a" ]
 if which = "func-word"       [ discard scan "a" [csComplement] ]
+if which = "inline-charset"  [ discard scan "a" [some charset "a-z"] ]
 if which = "capture-name"    [ discard scan "a" [capture x "a"] ]
 if which = "keep-outside"    [ discard scan "a" [keep "a"] ]
 if which = "collect-name"    [ discard scan "a" [collect x [keep "a"]] ]

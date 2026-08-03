@@ -12,11 +12,14 @@ set -eu
 cd "$(dirname "$0")/.."
 
 rm -rf docs
-mkdir -p docs/bugs
+mkdir -p docs/bugs docs/examples
 
 cp README.md   docs/index.md
+cp TUTORIAL.md docs/TUTORIAL.md
 cp MANUAL.md   docs/MANUAL.md
 cp proposal.md docs/proposal.md
-cp bugs/README.md docs/bugs/README.md
+cp bugs/README.md     docs/bugs/README.md
+cp examples/README.md docs/examples/README.md
 
-echo "staged docs/ from README.md, MANUAL.md, proposal.md, bugs/README.md"
+echo "staged docs/ from README.md, TUTORIAL.md, MANUAL.md, proposal.md,"
+echo "               bugs/README.md, examples/README.md"

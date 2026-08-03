@@ -8,9 +8,11 @@ on:
     # the tests, the examples — leaves the built pages byte-identical.
     paths:
       - README.md
+      - TUTORIAL.md
       - MANUAL.md
       - proposal.md
       - bugs/README.md
+      - examples/README.md
       - mkdocs.yml
       - requirements-docs.txt
       - scripts/stage-docs.sh
