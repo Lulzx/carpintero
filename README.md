@@ -31,7 +31,9 @@ print scanError
 
 A terminal that has a rule name is reported by that name, the innermost
 enclosing rule or capture becomes the while-matching context, and the
-offending line is shown with a caret under the column.
+offending line is shown with a caret under the column. For block input
+the report gives an index — or, when the failure is inside `into`, a
+path of indices into the nested structure.
 
 Block input uses the language's own type values as terminals:
 
@@ -79,7 +81,7 @@ Semantics worth knowing, all deliberate (the design rationale lives in
 ## Status
 
 Draft implementation of the proposal's Phase 0–2 scope, pure Arturo,
-verified against Arturo 0.10.0. `demo.art` is the test suite (56 checks):
+verified against Arturo 0.10.0. `demo.art` is the test suite (57 checks):
 
 ```
 arturo demo.art

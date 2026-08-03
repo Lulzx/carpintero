@@ -404,7 +404,10 @@ scan "2026-08-0x" date
 ```
 
 For block input, report a path of indices into the nested structure
-instead. A `fail "message"` rule for positions where failure means error
+instead; the draft does this by making the failure position itself
+path-qualified — the `into` descent indices plus the index, ordered
+lexicographically with deeper winning ties — which degenerates to the
+plain high-water mark on flat input. A `fail "message"` rule for positions where failure means error
 rather than alternative (after a committed keyword, say) is the labeled-
 failure refinement from the PEG literature, and slots in as a Phase 2 word.
 The same research line has since shown that labels and recovery expressions

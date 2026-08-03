@@ -134,6 +134,10 @@ check "into rejects non-block element" scan? [42] [into pair] false
 r5b: scan [[1 "one"] [2 "two"]] [some [into [:integer capture 'w :string]]]
 check "into: nested capture (last wins)" first r5b\w "two"
 
+;; a failure inside a nested block reports a path of indices into it
+r5c: scan [[1 "a"] [2 3]] [some [into [:integer :string]]]
+check "into: error is a path" in? "index path 1 1" scanError true
+
 ;; Phase 2, lookahead, collect and keep, host escape, error reporting.
 
 check "ahead looks without consuming" scan? "ab" [ahead "ab" "ab"] true

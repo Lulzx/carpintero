@@ -143,8 +143,8 @@ csMatch?: function [cs c][
 ;; and rollback is truncation — see Backtracking semantics in the
 ;; proposal.
 
-CS: #[inp: ""  len: 0  log: []  isblk: false  far: 0  exp: []  coldepth: 0
-      rules: []  dsc: []  ctx: ""  quiet: 0]
+CS: #[inp: ""  len: 0  log: []  isblk: false  farpath: []  exp: []  coldepth: 0
+      rules: []  dsc: []  ctx: ""  quiet: 0  path: []]
 
 logMark: function [][size CS\log]
 
@@ -164,14 +164,38 @@ logTrim: function [sz][
 ;;     top becomes the while-matching context of the report
 ;;   quiet, a counter that suppresses recording inside the operand of
 ;;     not, whose failures are the grammar succeeding
+;; a failure position is the into descent path plus the index, and
+;; farther means lexicographically later, deeper on ties — so failing
+;; inside element 2 beats failing at element 2, and either loses to
+;; failing at element 3
+FARTHER: 2
+SAMEPOS: 1
+NEARER:  0
+
+cmpPath: function [a b][
+    na: size a
+    nb: size b
+    i: 0
+    while [and? [i < na] [i < nb]][
+        if (a\[i]) > (b\[i]) -> return FARTHER
+        if (a\[i]) < (b\[i]) -> return NEARER
+        i: i + 1
+    ]
+    if na > nb -> return FARTHER
+    if na < nb -> return NEARER
+    SAMEPOS
+]
+
 failAt: function [pos what][
     if CS\quiet > 0 -> return null
     shown: (empty? CS\dsc)? -> what -> last CS\dsc
-    if pos > CS\far [
-        CS\far: pos
+    fp: CS\path ++ @[pos]
+    c: cmpPath fp CS\farpath
+    if c = FARTHER [
+        CS\farpath: fp
         CS\exp: []
     ]
-    if pos = CS\far [
+    unless c = NEARER [
         if empty? CS\exp [
             CS\ctx: (empty? CS\rules)? -> "" -> last CS\rules
         ]
@@ -354,26 +378,27 @@ matchElemRaw: function [items idx pos][
             el: CS\inp\[pos]
             unless block? el -> return failAt pos desc
             ; descend: swap the input for the nested block, match the
-            ; operand against all of it, then restore. The farthest
-            ; failure mark uses outer coordinates only, so nested
-            ; detail is summarized as the outer element that failed.
+            ; operand against all of it, then restore. The descent
+            ; index joins the failure path, so nested failures report
+            ; a path of indices into the nested structure.
             oInp: CS\inp
             oLen: CS\len
-            oFar: CS\far
-            oExp: CS\exp
-            oCtx: CS\ctx
             CS\inp: el
             CS\len: size el
-            CS\far: 0
-            CS\exp: []
+            CS\path: append CS\path pos
             inner: matchElem items idx + 1 0
+            done: false
+            if null? inner -> done: true
+            unless done [
+                unless inner = size el [
+                    t: failAt inner "end of nested block"
+                    done: true
+                ]
+            ]
+            CS\path: chop CS\path
             CS\inp: oInp
             CS\len: oLen
-            CS\far: oFar
-            CS\exp: oExp
-            CS\ctx: oCtx
-            if null? inner -> return failAt pos desc
-            unless inner = size el -> return failAt pos desc
+            if done -> return null
             return pos + 1
         ]
         if w = "quote" [
@@ -661,14 +686,22 @@ dfsCycle: function [k reg nmap state path][
     true
 ]
 
+;; verified rule sets, keyed by the rule and every resolved rule body,
+;; so redefining a named rule re-triggers the check — the cached per
+;; rule set behavior from the proposal
+GCACHE: #[]
+
 checkGrammar: function [rule][
     reg: #[]
     cr: collectRules rule reg
     if empty? keys reg -> return true
+    h: to :string hash @[rule reg]
+    if key? GCACHE h -> return true
     nmap: computeNullmap reg
     state: #[]
     loop keys reg 'k [ state\[k]: 0 ]
     loop keys reg 'k [ d: dfsCycle k reg nmap state [] ]
+    GCACHE\[h]: true
     true
 ]
 
@@ -687,13 +720,14 @@ scan: function [input rule][
     CS\len: size input
     CS\isblk: block? input
     CS\log: []
-    CS\far: 0
+    CS\farpath: []
     CS\exp: []
     CS\coldepth: 0
     CS\rules: []
     CS\dsc: []
     CS\ctx: ""
     CS\quiet: 0
+    CS\path: []
     p: matchBlock rule 0
     if null? p -> return null
     if and? (null? pfx) (p <> CS\len) -> return null
@@ -736,10 +770,14 @@ scan: function [input rule][
 ;; human-readable report for the most recent failed scan, built from
 ;; the farthest-failure high-water mark
 scanError: function [][
-    f: CS\far
+    f: (empty? CS\farpath)? -> 0 -> last CS\farpath
     exp: (empty? CS\exp)? -> "end of input" -> join.with: ", " CS\exp
     ctxs: (CS\ctx = "")? -> "" -> ~"  (while matching: |CS\ctx|)"
     if CS\isblk [
+        if 1 < size CS\farpath [
+            pth: join.with: " " CS\farpath
+            return ~"scan failed at index path |pth| — expected: |exp||ctxs|"
+        ]
         return ~"scan failed at index |f| — expected: |exp||ctxs|"
     ]
     line: 1
