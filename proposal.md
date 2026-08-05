@@ -235,6 +235,19 @@ The model has independent validation in the literature: Kuramitsu's AST
 machine for Nez treats tree construction as transactions over exactly this
 kind of log, aborted on backtrack, and reports it practical at scale.
 
+**A capture survives only if the match consumed the input it names.** That
+is the same rule stated to cover the constructs that succeed while rewinding
+the position, rather than only the ones that fail. A successful `ahead` has
+not failed, so an argument from failure alone would let it keep a capture
+describing input the match never took, and would let a `defer` inside a test
+commit. The exclusive `to` is the same shape, its probe matching past where
+the rule leaves off. Both roll their operand's captures back; `thru`, which
+consumes what it matched, keeps them. LPeg reaches the same place through
+its machine rather than its manual: `ahead` and `to` are exactly the two
+constructs that compile to `BackCommit`, and LPeg's `IBackCommit` restores
+the capture level along with the position. Peggy arrived there from the
+other direction, by taking values away from predicates that had them.
+
 **Host escapes do not roll back.** `do [...]` runs arbitrary Arturo code, and
 its side effects cannot be undone when the matcher backtracks over them. The
 contract is explicit: an escape may run on a parse path that is later

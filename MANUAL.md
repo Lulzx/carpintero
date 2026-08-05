@@ -4,7 +4,7 @@ The complete reference for the dialect. If you are here to *learn* it,
 [TUTORIAL.md](TUTORIAL.md) is the guided path and this is what you reach
 for afterwards. The design rationale lives in
 [proposal.md](proposal.md). Everything here is exercised by `demo.art`
-(71 checks, the readable tour) and `tests.art` (359 checks, the
+(72 checks, the readable tour) and `tests.art` (377 checks, the
 regression suite) against Arturo 0.10.0.
 
 ```red
@@ -257,12 +257,34 @@ First match wins. There is no ambiguity and no reconsideration.
 
 `to` and `thru` fail if `rule` never matches in the rest of the input.
 
+The difference between them reaches captures. `thru` consumes the span
+`rule` matched, so a capture inside it stands; `to` stops before that
+span, so its probe's captures roll back like a lookahead's:
+
+```red
+scan "ab" [thru [capture 'x "b"]]        ; => [x:b]
+scan "ab" [to   [capture 'x "b"] skip]   ; => []
+```
+
 ### Lookahead
 
 | Form | Meaning |
 | --- | --- |
 | `ahead rule` | succeed if `rule` matches here, consuming nothing |
 | `not rule` | succeed if `rule` does **not** match here, consuming nothing |
+
+Neither one leaves a capture behind, whichever way it goes:
+
+```red
+scan "abc" [ahead [capture 'peek "ab"] "abc"]   ; => []
+scan "abc" [not  [capture 'nope "zz"] "abc"]    ; => []
+```
+
+A lookahead consumes nothing, so a capture made inside one would name
+input the match never took. Both roll back, and so does a `defer` queued
+inside one, which keeps a lookahead from committing an effect. Capture
+during the real match instead, at the cost of rematching text the
+lookahead has just proved is there.
 
 ### Captures
 
@@ -281,6 +303,9 @@ keep rule                 ; inside collect: keep the span rule consumed
   later fails is discarded with it: a dead parse path leaves nothing
   behind. (This deliberately diverges from Rebol/Red, in the direction
   every modern engine took.)
+- The general form of that rule: **a capture survives only if the match
+  consumed the input it names.** Failure is the common way to consume
+  nothing, and the lookaheads and the exclusive `to` are the others.
 - `keep` outside any `collect` panics.
 
 ### Descending into blocks
@@ -636,8 +661,8 @@ The absences are scope decisions, argued in the proposal, not gaps.
 ## Running the tests
 
 ```
-arturo demo.art     # the readable tour, 71 checks
-arturo tests.art    # the regression suite, 359 checks
+arturo demo.art     # the readable tour, 72 checks
+arturo tests.art    # the regression suite, 377 checks
 arturo tests.art trace
 ```
 

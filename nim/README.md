@@ -345,19 +345,33 @@ recursive tree walk, which is the most useful shape block input has. The
 interpreted pre-pass excludes it for the same reason, and the compiled one
 did not until a walk that works there was rejected here.
 
-## A question the translation raised
+## A question the translation raised, and how it was settled
 
-A successful `ahead` keeps what it captured. `not` discards what its operand
-captured. Both were checked against the interpreted matcher:
+The translation turned up an asymmetry the manual had never stated. A
+successful `ahead` kept what it captured, `not` discarded what its operand
+captured, and both engines agreed only because one had been written to
+match the other. It was defensible as it stood, since the manual rolled
+captures back when an alternative *failed* and a successful lookahead has
+not failed, but it meant `ahead` could leave a capture describing input the
+match never consumed, and a `defer` inside a test could reach commit.
+
+The instruction set settled it. `ahead` and the exclusive `to`
+are the only two constructs that compile to `BackCommit`, and LPeg's
+`IBackCommit` restores the capture level along with the position, where
+`ICommit` restores neither. The instruction had been borrowed without that
+half. Restoring the log in `opBackCommit` is one line and settles both
+constructs at once:
 
 ```arturo
-scan "abc" [ahead [capture 'peek "ab"] "abc"]   ; => [peek:ab]
+scan "abc" [ahead [capture 'peek "ab"] "abc"]   ; => []
 scan "abc" [not [capture 'nope "zz"] "abc"]     ; => []
+scan "ab"  [to [capture 'x "b"] skip]           ; => []
+scan "ab"  [thru [capture 'x "b"]]              ; => [x:b]
 ```
 
-The compiled core reproduces both, and `tests/test_vm.nim` pins them. The
-asymmetry is defensible, since the manual rolls captures back when an
-alternative *fails* and a successful lookahead has not failed, but it does
-mean `ahead` can leave a capture describing input the match never consumed.
-Worth settling before the semantics are called stable, which is the argument
-for settling them upstream rather than here.
+What the two lookaheads have in common is now the rule, and `thru`, which
+consumes the span it matched, is the one that keeps its captures: **a
+capture survives only if the match consumed the input it names.** The
+interpreted matcher rolls the same log back at the same three places,
+`tests/test_vm.nim` pins all four lines above, and 2000 fuzzed grammars
+found no disagreement between the engines afterward.

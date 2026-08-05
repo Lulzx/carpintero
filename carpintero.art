@@ -580,7 +580,13 @@ matchElem: function [items idx pos][
             return (null? p)? -> pos -> null
         ]
         if k = 7 [
+            sz: size CS\log
             p: matchElem items idx + 1 pos
+            ; the operand consumed nothing the match keeps, so it leaves
+            ; nothing behind: a capture names input this rule did not consume
+            if (size CS\log) > sz [
+                CS\log: (sz = 0)? -> [] -> slice CS\log 0 sz - 1
+            ]
             return (null? p)? -> null -> pos
         ]
         if k = 8 -> return matchScan items idx + 1 pos false
@@ -854,7 +860,16 @@ matchScan: function.inline [sItems sIdx sPos sIncl][
         sSz: size CS\log
         sP: matchOne sItems sIdx sI
         if sP = NOTSIMPLE -> sP: matchElem sItems sIdx sI
-        unless null? sP -> return (sIncl)? -> sP -> sI
+        unless null? sP [
+            if sIncl -> return sP
+            ; exclusive: the position stops before the operand's match, so
+            ; the probe's captures name input this rule did not consume and
+            ; go back with it, as they do under a lookahead
+            if (size CS\log) > sSz [
+                CS\log: (sSz = 0)? -> [] -> slice CS\log 0 sSz - 1
+            ]
+            return sI
+        ]
         if (size CS\log) > sSz [
             CS\log: (sSz = 0)? -> [] -> slice CS\log 0 sSz - 1
         ]

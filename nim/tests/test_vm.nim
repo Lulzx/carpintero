@@ -142,17 +142,17 @@ suite "lookahead":
         let ahead = g(alt(sq(Node(kind: nkAhead, body: str("ab")), str("abc"))))
         check scanQ(ahead, "abc")
 
-    test "a successful ahead keeps what it captured":
-        # Verified against the interpreted matcher, which returns [peek:ab]
-        # here. `not` rolls its operand's captures back and `ahead` does not,
-        # so the two lookaheads differ; see the README on whether that is
-        # meant to be the contract.
+    test "a successful ahead discards what it captured":
+        # The lookahead consumed nothing, so `peek` would name input the
+        # match never took. Both lookaheads therefore leave nothing behind,
+        # as does the probe inside an exclusive `to`; the interpreted
+        # matcher agrees.
         let r = scan(g(alt(sq(
             Node(kind: nkAhead, body: alt(sq(
                 Node(kind: nkCap, capName: "peek", capBody: alt(sq(str("ab"))))))),
             str("abc")))), "abc")
         check r.ok
-        check r.captures["peek"] == "ab"
+        check "peek" notin r.captures
 
     test "not discards what its operand captured":
         let r = scan(g(alt(sq(
@@ -171,6 +171,25 @@ suite "to and thru":
             Node(kind: nkAny, body: Node(kind: nkSkip))))), "abc,def")
         check r.ok
         check r.captures["head"] == "abc"
+
+    test "the exclusive to discards what its probe captured":
+        # `to` and `ahead` are the only two constructs that reach
+        # BackCommit, and they rewind their captures for the same reason.
+        let r = scan(g(alt(sq(
+            Node(kind: nkTo, body: alt(sq(
+                Node(kind: nkCap, capName: "probe", capBody: alt(sq(str(","))))))),
+            Node(kind: nkSkip),
+            Node(kind: nkAny, body: Node(kind: nkSkip))))), "abc,def")
+        check r.ok
+        check "probe" notin r.captures
+
+    test "thru keeps what it captured, having consumed it":
+        let r = scan(g(alt(sq(
+            Node(kind: nkThru, body: alt(sq(
+                Node(kind: nkCap, capName: "probe", capBody: alt(sq(str(","))))))),
+            Node(kind: nkAny, body: Node(kind: nkSkip))))), "abc,def")
+        check r.ok
+        check r.captures["probe"] == ","
 
     test "thru consumes the match":
         let r = scan(g(alt(sq(

@@ -144,6 +144,11 @@ check "ahead looks without consuming" scan? "ab" [ahead "ab" "ab"] true
 check "not negates" scan? "ba" [not "a" skip skip] true
 check "not fails on match" scan? "ab" [not "a" skip skip] false
 
+;; a lookahead consumes nothing, so it keeps nothing: a capture survives
+;; only if the match consumed the input it names
+r5b: scan "ab" [ahead [capture 'peek "a"] "ab"]
+check "ahead captures nothing" key? r5b "peek" false
+
 alpha: charset "a-z"
 r6: scan "one, two, three" [collect 'words [some [keep [some alpha] | skip]]]
 check "collect gathers" size r6\words 3

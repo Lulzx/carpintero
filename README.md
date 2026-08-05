@@ -130,9 +130,12 @@ Four that surprise people. All deliberate, all argued in
 
 - **The whole input must match.** A rule that matches a prefix and stops
   short is a failure. `scan.prefix` is the other mode.
-- **Captures roll back.** A capture made in an alternative that later fails
-  leaves nothing behind, and the same goes for `keep`. Rebol and Red do the
-  opposite, on purpose here.
+- **A capture survives only if the match consumed the input it names.** One
+  made in an alternative that later fails leaves nothing behind, and the same
+  goes for `keep`; Rebol and Red do the opposite, on purpose here. Failing is
+  not the only way to consume nothing, so `ahead`, `not` and the exclusive
+  `to` roll their operand's captures back too, while `thru` keeps what it
+  consumed.
 - **`do` escapes may run more than once**, on parse paths that are later
   abandoned, so they should compute rather than mutate. `defer` is the sound
   alternative: queued in the capture log, run once on overall success, and
@@ -157,12 +160,12 @@ scripts/run-tests.sh
 
 | Suite | What it covers |
 | --- | --- |
-| `tests.art` | 373 checks over the interpreted matcher |
+| `tests.art` | 377 checks over the interpreted matcher |
 | `tests-panics.art` | 18 grammar errors, one interpreter each |
-| `nim/tests/test_vm.nim` | 46 checks over the compiled core |
+| `nim/tests/test_vm.nim` | 48 checks over the compiled core |
 | `nim/tests/test_wire.nim` | the FFI input read both ways and compared |
 | `nim/tests/differential.nim` | 78 cases run in both engines and compared |
-| `demo.art` | 71 checks, written to be read rather than to cover |
+| `demo.art` | 72 checks, written to be read rather than to cover |
 
 The panic cases need one interpreter apiece: a panic unwound through `try`
 leaves the abandoned frames' values behind for the next statements to

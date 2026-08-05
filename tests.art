@@ -298,11 +298,18 @@ discard t "capture over a counted group" c10\i "abc"
 c11: scan "abc" [not "z" capture 'j [some skip]]
 discard t "capture after a lookahead" c11\j "abc"
 
-;; captures roll back out of a lookahead operand
+;; a capture survives only if the match consumed the input it names, so
+;; both lookaheads and the exclusive to leave nothing behind
 c12: scan "ab" [ahead [capture 'la "a"] "ab"]
-discard t "capture inside ahead survives" c12\la "a"
+discard t "capture inside ahead is gone" key? c12 "la" false
 c13: scan "ab" [not [capture 'nn "z"] "ab"]
 discard t "capture inside not is gone" key? c13 "nn" false
+c14: scan "ab" [to [capture 'tp "b"] skip]
+discard t "capture inside the to probe is gone" key? c14 "tp" false
+c15: scan "ab" [thru [capture 'tp "b"]]
+discard t "capture inside thru survives" c15\tp "b"
+c16: scan "aa" [collect 'ks [ahead [keep "a"] some keep "a"]]
+discard t "keep inside ahead is gone" size c16\ks 2
 
 ;; ── collect and keep ─────────────────────────────────────────────────
 discard section "collect"
@@ -379,6 +386,10 @@ discard t "do inside not still runs" E\n 1
 E\n: 0
 discard scan "ab" [not ["a" defer [bump 1] "z"] "ab"]
 discard t "defer inside not is discarded" E\n 0
+
+E\n: 0
+discard scan "ab" [ahead ["a" defer [bump 1]] "ab"]
+discard t "defer inside ahead is discarded" E\n 0
 
 discard t "unreached fail does not panic" scan? "b" ["a" fail "nope" | "b"] true
 
@@ -770,7 +781,7 @@ discard t "collect over a block rule" size nest2\pairs 2
 nest3: scan "xxpq" [to inner capture 'tail [some skip]]
 discard t "capture after to a rule" nest3\tail "pq"
 nest4: scan "pq" [ahead [capture 'a alt] capture 'b inner]
-discard t "capture under ahead of a rule" nest4\a "p"
+discard t "capture under ahead of a rule is gone" key? nest4 "a" false
 discard t "capture after the lookahead" nest4\b "pq"
 
 ;; the same shapes over block input, through into

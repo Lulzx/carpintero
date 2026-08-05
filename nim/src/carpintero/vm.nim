@@ -409,12 +409,14 @@ proc run*(prog: Program, src: Source): MatchResult =
 
         of opBackCommit:
             # succeed at the saved position: `ahead`, and the probe inside
-            # `to`. The capture log is deliberately not restored, matching the
-            # interpreted matcher, where a successful lookahead keeps what it
-            # captured. See the README on whether that should be the contract.
+            # `to`. Rewinding the position rewinds the log with it, so a
+            # capture survives only if the match consumed the input it names.
+            # LPeg's IBackCommit restores its capture level for the same
+            # reason; these are the only two constructs that reach here.
             let f = m.stack[^1]
             m.stack.setLen(m.stack.len - 1)
             pos = f.pos
+            m.log.setLen(f.logTop)
             m.views.setLen(f.viewTop)
             m.curView = f.curView
             pc += ins.arg
