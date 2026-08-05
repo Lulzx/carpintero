@@ -45,7 +45,6 @@ nav:
   - Examples: examples/README.md
   - Compiled core: nim/README.md
   - Proposal: proposal.md
-  - Interpreter bugs: bugs/README.md
 
 # The markdown lives at the repository root and is staged into docs/, so a
 # cross-document link has to work in two renderers at once. Ask mkdocs to

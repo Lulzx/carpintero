@@ -11,8 +11,8 @@ on:
       - TUTORIAL.md
       - MANUAL.md
       - proposal.md
-      - bugs/README.md
       - examples/README.md
+      - nim/README.md
       - mkdocs.yml
       - requirements-docs.txt
       - scripts/stage-docs.sh

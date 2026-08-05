@@ -1,7 +1,7 @@
 ;; safeload.art — running the file that hangs the interpreter.
 ;;
-;; bugs slash comment-lexer-hang.art cannot be run or imported: its
-;; comment contains a backslash-dash and the 0.10.0 lexer never
+;; hangs-the-lexer.art cannot be run or imported: its comment contains
+;; a backslash-dash and the 0.10.0 lexer never
 ;; returns. loadSafe reads it as a raw string, strips the comments
 ;; with a Carpintero grammar before any lexing happens, and hands the
 ;; clean source to the lexer — the package fixing the language with
@@ -10,5 +10,5 @@
 import ./"../carpintero.art"!
 
 print "loading the file that hangs the interpreter..."
-discard do loadSafe ./"../bugs/comment-lexer-hang.art"
+discard do loadSafe ./"hangs-the-lexer.art"
 print "loaded and executed. it printed its own line above."

@@ -167,7 +167,7 @@ check "do runs per attempt" G\n 3
 
 ;; escape blocks may assign directly: the matcher pads them with a
 ;; trailing value before evaluation, which sidesteps the interpreter
-;; crash documented in bugs, do-assignment-crash
+;; crash a value-less escape block used to cause
 G4: #[n: 0]
 r8b: scan "ab" ["a" do [G4\n: 5] "b"]
 check "do escape may assign" G4\n 5
@@ -185,8 +185,7 @@ check "cut is local to its block" scan? "ab" [["a" cut "x" | "z"] | "ab"] true
 ;; defer: a host escape that runs only on overall success, exactly
 ;; once, in match order — dead branches take their defers with them.
 ;; escape functions end with a value on purpose: a function whose
-;; body ends in an assignment crashes when invoked through do, see
-;; bugs, do-assignment-crash
+;; body ends in an assignment crashes when invoked through do
 G2: #[n: 0]
 bump: function [x][ G2\n: G2\n + x  x ]
 r10: scan "ab" ["a" defer [bump 1] "b"]

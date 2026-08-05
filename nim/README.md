@@ -257,8 +257,7 @@ Two places where the compiled core does not reproduce the interpreted one,
 both recorded in tests so they cannot drift by accident.
 
 `quote` compares structurally. The interpreted matcher compares with Arturo's
-`=`, and on 0.10.0 a `:symbolliteral` is not equal to itself
-(`../bugs/symbolliteral-equality.art`), so `quote '+` cannot match a `'+`
+`=`, and on 0.10.0 a `:symbolliteral` is not equal to itself, so `quote '+` cannot match a `'+`
 there and can here. That is the interpreter's bug rather than a semantic
 choice, so the compiled core is not copying it.
 

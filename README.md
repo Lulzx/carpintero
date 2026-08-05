@@ -211,17 +211,17 @@ and a half, and a cost per kilobyte that stays flat as the input doubles.
 
 ## Interpreter bugs
 
-[`bugs/`](bugs/README.md) has minimal repros for three Arturo 0.10.0
-interpreter bugs: a backslash in a `;;` documentation comment that hangs
-the lexer, a
+Writing the dialect turned up three Arturo 0.10.0 interpreter bugs: a
+backslash in a `;;` documentation comment that hangs the lexer, a
 value-stack underflow that exits 1 without a word, and a `:symbolliteral`
-that is not equal to itself. The
-first two were found by writing the dialect and the third by running it over
-Arturo's own test suite. A fourth repro is filed alongside them and is not a
-bug: a value left unused inside a callee is popped as an argument by the
-enclosing call, which is the value stack working as designed, down to the
-displaced argument waiting there for the next call that wants one. Each has
-an in-language workaround, used in `carpintero.art`.
+that is not equal to itself. The first two came from writing the dialect
+and the third from running it over Arturo's own test suite. A fourth
+candidate is not a bug: a value left unused inside a callee is popped as an
+argument by the enclosing call, which is the value stack working as
+designed, down to the displaced argument waiting there for the next call
+that wants one. Each has an in-language workaround, used in
+`carpintero.art`; `examples/hangs-the-lexer.art` is the repro for the
+first, and `examples/safeload.art` loads it anyway.
 
 ## Reading
 

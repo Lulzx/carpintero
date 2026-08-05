@@ -655,7 +655,7 @@ matchElem: function [items idx pos][
             ; padded with a trailing value before evaluation: an escape
             ; block ending in an assignment leaves nothing on the value
             ; stack, and discard then pops an empty one, which exits 1
-            ; without a word — see bugs, stack-underflow-exit.
+            ; without a word.
             ; With the padding, escape blocks may assign, mutate via
             ; set, or call zero-arity functions freely.
             discard do op ++ [true]
@@ -1289,7 +1289,7 @@ scan?: function [input rule][
 ;; ── comment-safe source loading ──────────────────────────────────────
 ;; The 0.10.0 lexer does not fully ignore comment contents: a
 ;; backslash-dash in a comment hangs the file loader, and quotes or
-;; brackets in comments corrupt the token stream — see bugs. The way
+;; brackets in comments corrupt the token stream. The way
 ;; around it, from first principles: read gives us the raw source as a
 ;; string without lexing anything, so strip comments at the string
 ;; level and only then hand the result to the lexer, which never sees

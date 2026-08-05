@@ -1,3 +1,5 @@
+; The fixture for safeload.art: a file the 0.10.0 interpreter cannot load.
+;
 ; `;;` is Arturo's documentation-comment form: the interpreter reads its
 ; contents and stores them as function metadata for `info`. Reading it is
 ; the feature. Hanging on it is not.

@@ -139,8 +139,7 @@ something different once it is pointed at a block.
 `quote` compares with `=`, which is exact for every type except one: on
 Arturo 0.10.0 a `:symbolliteral` is not equal to itself, so `[quote '+]`
 can never match a `'+`. The `:symbolliteral` type terminal is
-unaffected: match the type and inspect the capture. See
-[bug 4](bugs/README.md#4-symbolliteral-equalityart-a-symbolliteral-is-not-equal-to-itself).
+unaffected: match the type and inspect the capture.
 
 ### Charsets
 
@@ -385,7 +384,7 @@ Escape blocks may assign, call zero-arity functions, and use `set`
 freely. The matcher pads each block with a trailing value before
 evaluation, so that a block ending in an assignment still leaves something
 on the value stack for `discard` to take. Without the padding the stack
-underflows and the run ends without a word (see [bugs/](bugs/README.md)).
+underflows and the run ends without a word.
 
 An escape block evaluates in a scope of its own, so a plain assignment
 inside one does not reach a variable outside it. To accumulate across a
@@ -491,7 +490,7 @@ with the numbers under
 
 Two utilities ride along because `;;` is the documentation-comment form
 and the 0.10.0 lexer reads it: a backslash in one hangs the loader, and an
-unbalanced delimiter in one is a syntax error (see `bugs/`).
+unbalanced delimiter in one is a syntax error.
 
 ```red
 stripComments src         ; source string -> source string, comments gone
@@ -544,8 +543,7 @@ behaving correctly rather than failing.
 The two that compared unequal are the interesting ones, and the stripper
 was not at fault: on 0.10.0 **a `:symbolliteral` is not equal to
 itself**, so any file containing a `'+` compares unequal to a
-byte-identical copy of itself. That is
-[bug 4](bugs/README.md#4-symbolliteral-equalityart-a-symbolliteral-is-not-equal-to-itself),
+byte-identical copy of itself. That one was
 found by using the dialect rather than by writing it. It reaches one
 corner of Carpintero: `[quote '+]` cannot match a `'+` in block input,
 because `quote` compares with `=`. Match `:symbolliteral` and inspect

@@ -377,8 +377,8 @@ grammar succeeding. Direct left recursion
 (`expr: [expr "+" digit | digit]`), indirect left recursion through a
 nullable prefix, and unbound rule words are all rejected at scan start with
 messages naming the cycle or the word. Writing it also surfaced two
-interpreter bugs worth filing upstream, which is what dogfooding is for
-(minimal repros in `bugs/`): the 0.10.0 lexer reads the contents of a `;;`
+interpreter bugs worth filing upstream, which is what dogfooding is for:
+the 0.10.0 lexer reads the contents of a `;;`
 documentation comment, as it should, but a backslash before anything but a
 letter hangs it forever,
 and popping an empty value stack ends the run with exit 1 and no message at
@@ -390,8 +390,8 @@ other consumer, an escape block ending in an assignment leaves none, and the
 draft sidesteps it by padding every escape block with a trailing value
 (`op ++ [true]`) and discarding the result, so escapes may in fact assign
 freely. Only the silent exit is worth reporting, since a stack that runs dry
-should say so. A third repro sits beside those two and
-is not a bug: a value left unused inside a function is popped as an argument
+should say so. A third case looked like a bug and
+is not: a value left unused inside a function is popped as an argument
 by the call enclosing it, which is the value stack working as designed. The
 draft had it filed as a `return` bug until the plain reading was pointed
 out, and the displaced argument is not lost either, it waits on the stack
@@ -402,7 +402,7 @@ the lexer bug has an in-language mitigation, and it is the most
 Carpintero-shaped fix imaginable: `read` returns raw source without
 lexing anything, so `loadSafe` strips comments at the string level
 with a seven-rule Carpintero grammar and only then hands the source to
-the lexer, which never sees a comment byte. The file in `bugs/` that
+the lexer, which never sees a comment byte. The file in `examples/` that
 hangs the interpreter runs correctly through it
 (`examples/safeload.art`), the dialect fixing the language's own
 front end, which is demo 3's thesis stated as a working program.

@@ -13,7 +13,7 @@ arturo examples/json.art
 | `csv.art` | RFC 4180 CSV in seven rules | Quoting rules, doubled quotes inside quoted fields, and why `to`/`thru` are not always the answer. |
 | `arturo-scan.art` | Arturo reading one file of its own source | Every top-level function definition in `carpintero.art`, name and parameter list, extracted without running any of it. |
 | `arturo-corpus.art` | Arturo reading *all* of its own source | Takes the path to an Arturo checkout. The differential test that validates `stripComments` against a megabyte of real source, plus a recursive `into` walk that finds every definition at any nesting depth. See below. |
-| `safeload.art` | `loadSafe` on a file that breaks the lexer | Runs `bugs/comment-lexer-hang.art`, a file that hangs `arturo` outright, by stripping its comments with a Carpintero grammar before the lexer sees them. |
+| `safeload.art` | `loadSafe` on a file that breaks the lexer | Runs `hangs-the-lexer.art`, a file that hangs `arturo` outright, by stripping its comments with a Carpintero grammar before the lexer sees them. |
 | `bench.art` | The Phase 3 numbers | `scan` against the native regex engine, memoization against a deliberately exponential grammar, and cost per kilobyte as the input doubles. |
 
 ## Running the corpus example

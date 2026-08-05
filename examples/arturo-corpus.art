@@ -113,7 +113,7 @@ loop files 'f [
 
     ; Both legs are guarded. The raw leg is the one that can genuinely
     ; blow up — it hands comment bytes to the 0.10.0 lexer, which is the
-    ; whole reason stripComments exists (see bugs/).
+    ; whole reason stripComments exists.
     sb: null
     rb: null
     try [ sb: to :block stripped true ]
@@ -154,5 +154,5 @@ unless empty? nDiffer [
     print "The unequal files are worth a look before blaming the stripper:"
     print "on 0.10.0 a :symbolliteral is not equal to itself, so any file"
     print "holding one compares unequal to a byte-identical copy of"
-    print "itself. See bugs/issue-4-symbolliteral-equality.md."
+    print "itself. See MANUAL.md, under comment-safe source loading."
 ]
