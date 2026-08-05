@@ -1,0 +1,9 @@
+# An `import "carpintero"!` downloads a GitHub archive of this repository,
+# so anything that only serves the repository itself is kept out of it.
+# GitHub honours export-ignore when it builds the tarball.
+.github/          export-ignore
+.gitattributes    export-ignore
+.gitignore        export-ignore
+mkdocs.yml        export-ignore
+requirements-docs.txt export-ignore
+scripts/          export-ignore

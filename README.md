@@ -52,18 +52,27 @@ scan code [any [funcdef | skip]]
 
 ## Using it
 
-One file, no dependencies, nothing to build. Copy `carpintero.art` next to
-your script and import it:
+Import it by name and Arturo fetches it from
+[pkgr.art](https://pkgr.art):
 
 ```red
-import ./"carpintero.art"!
+import "carpintero"!
 
 digit: charset "0-9"
 scan "2026-08-03" [capture 'year [4 digit] "-" capture 'month [2 digit] "-" capture 'day [2 digit]]
 ```
 
-Arturo 0.10.0 or later. `info.art` is the `pkgr.art` manifest for whenever
-the semantics are settled enough to publish; until then it is a clone away.
+`arturo -p install carpintero` fetches it ahead of time instead, and
+`import.version:0.1.0 "carpintero"!` pins a release.
+
+Keep the trailing `!`. It imports the package before the rest of the file
+is parsed, so `scan` and `charset` are read as calls. Written without it,
+those words evaluate to the functions themselves, and `digit: charset "0-9"`
+binds `digit` to `charset`.
+
+One file, no dependencies, nothing to build: copying `carpintero.art` next
+to your script and writing `import ./"carpintero.art"!` works too.
+Arturo 0.10.0 or later.
 
 ## Vocabulary
 
