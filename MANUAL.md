@@ -498,7 +498,7 @@ stripComments src         ; source string -> source string, comments gone
 do loadSafe "file.art"    ; read, strip, lex (no comment reaches the lexer)
 ```
 
-The stripper is itself a nine-rule Carpintero grammar: it respects
+The stripper is itself a seven-rule Carpintero grammar: it respects
 double-quoted strings with escapes, nested curly strings, and char
 literals, and keeps newlines so line numbers survive. `loadSafe` pads
 the lexed block with a trailing `true`, so its `do` result is the

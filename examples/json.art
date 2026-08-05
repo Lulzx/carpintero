@@ -1,4 +1,4 @@
-;; json.art — the proposal demo: JSON in about fifteen rules.
+;; json.art — the proposal demo: JSON in nine rules over two charsets.
 ;; Full grammar: strings with escapes, numbers with exponents,
 ;; nested containers, whitespace everywhere the spec allows it.
 

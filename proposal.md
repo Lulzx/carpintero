@@ -401,7 +401,7 @@ request to document the interaction. Even
 the lexer bug has an in-language mitigation, and it is the most
 Carpintero-shaped fix imaginable: `read` returns raw source without
 lexing anything, so `loadSafe` strips comments at the string level
-with a nine-rule Carpintero grammar and only then hands the source to
+with a seven-rule Carpintero grammar and only then hands the source to
 the lexer, which never sees a comment byte. The file in `bugs/` that
 hangs the interpreter runs correctly through it
 (`examples/safeload.art`), the dialect fixing the language's own
@@ -595,19 +595,20 @@ dialect must agree with the language about what position N means.
 All three now exist as runnable scripts in `examples/`, against the draft
 implementation.
 
-1. **JSON in eleven lines of rules.** Instantly legible, and everyone
+1. **JSON in nine rules.** Instantly legible, and everyone
    already knows the grammar, so the reader is comparing presentations rather
    than learning a format.
 2. **A format the core currently hand-parses in Nim.** `helpers/` contains
    hand-written `csv.nim`, `toml.nim`, `xml.nim`, `url.nim`, and `markdown.nim`.
-   Showing CSV or TOML as a dozen lines of Arturo rules is a demo of
+   Showing CSV as seven Arturo rules, or TOML as not many more, is a demo of
    expressiveness today, and a structural argument only later:
    replacing those parsers depends on the Phase 3 compiled core being fast
    enough, and even then some may stay in Nim. The direction is still worth
    pointing at as Phase 3 work: Nim code becoming Arturo code, a smaller core,
    a language further toward self-hosting.
 3. **Arturo parsing Arturo.** Extract every function definition from a source
-   file in six lines of rules, then point at the completion package on the
+   file with one rule and the scan that collects it, then point at the
+   completion package on the
    wishlist and note that this is most of its front end.
 
 ## Known problems

@@ -1,5 +1,5 @@
 ;; csv.art — the proposal demo: the format the core hand-parses in
-;; helpers slash csv.nim, as a dozen lines of rules. RFC 4180 shape:
+;; helpers slash csv.nim, as seven rules. RFC 4180 shape:
 ;; quoted fields, doubled-quote escapes, bare fields, CRLF or LF.
 
 import ./"../carpintero.art"!

@@ -254,7 +254,7 @@ the interpreter bug it turned up.
 
 - [MANUAL.md](MANUAL.md), the complete reference: every word, the error
   report, memoization, `cut`, `defer`, the PEG pitfalls in full.
-- `demo.art`, the same ground as this tutorial in executable form, 71
+- `demo.art`, the same ground as this tutorial in executable form, 72
   checks, printing as it goes.
-- `examples/`: [JSON in fifteen rules, RFC 4180 CSV in a dozen, the
+- `examples/`: [JSON in nine rules, RFC 4180 CSV in seven, the
   self-scan, and the benchmarks](examples/README.md).

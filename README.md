@@ -191,9 +191,10 @@ and what the empty string means against a block.
 ## Examples
 
 [`examples/`](examples/README.md) holds the proposal's three demos, each
-runnable on its own: JSON in thirteen rules (`json.art`), RFC 4180 CSV in
-nine (`csv.art`), and Arturo scanning its own source, one rule extracting
-every function definition from `carpintero.art` itself (`arturo-scan.art`).
+runnable on its own: JSON in nine rules over two charsets (`json.art`),
+RFC 4180 CSV in seven (`csv.art`), and Arturo scanning its own source, one
+rule extracting every function definition from `carpintero.art` itself
+(`arturo-scan.art`).
 
 `arturo-corpus.art` takes that last one all the way. Point it at a checkout
 of Arturo and it runs both grammars over every `.art` file in the language's
